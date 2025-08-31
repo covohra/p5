@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: p5-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: p5
+      POSTGRES_PASSWORD: p5pass
+      POSTGRES_DB: p5db
+    ports:
+      - "55432:5432"   # <-- publish container 5432 to host 55432
+    volumes:
+      - ./storage/postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: p5-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./storage/redis:/data
