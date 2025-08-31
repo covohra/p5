@@ -1,14 +1,14 @@
-require('dotenv').config();
-const { PrismaClient } = require('@prisma/client');
+require("dotenv").config();
+const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
 (async () => {
-  const alice = await prisma.user.upsert({
-    where: { email: 'alice@example.com' },
+  const user = await prisma.user.upsert({
+    where:  { email: "covohra@gmail.com" },
     update: {},
-    create: { email: 'alice@example.com', name: 'Alice' }
+    create: { email: "covohra@gmail.com", name: "Faseeh Vohra" }
   });
-  console.log('Seeded:', alice.email);
+  console.log("Seeded:", user.email);
   await prisma.$disconnect();
 })().catch(async (e) => {
   console.error(e);

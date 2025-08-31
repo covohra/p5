@@ -3,16 +3,18 @@
   "private": true,
   "version": "0.0.1",
   "packageManager": "pnpm@10.15.0",
+  "workspaces": [
+    "apps/*",
+    "prisma"
+  ],
   "scripts": {
     "db:up": "docker compose up -d",
     "db:down": "docker compose down -v",
     "db:ps": "docker compose ps",
+
     "prisma:generate": "pnpm --filter @p5/prisma run generate",
     "prisma:migrate": "pnpm --filter @p5/prisma run migrate",
-    "prisma:seed": "pnpm --filter @p5/prisma run seed"
-  },
-  "workspaces": [
-    "apps/*",
-    "prisma"
-  ]
+    "prisma:seed": "pnpm --filter @p5/prisma run seed",
+    "db:smoke": "pnpm --filter @p5/prisma exec node ./scripts/db-smoke.cjs"
+  }
 }

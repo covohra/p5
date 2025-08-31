@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: p5pass
       POSTGRES_DB: p5db
     ports:
-      - "55432:5432"   # <-- publish container 5432 to host 55432
+      - "55432:5432"   # host:container (you chose 55432 on host)
     volumes:
       - ./storage/postgres:/var/lib/postgresql/data
 
@@ -19,4 +19,4 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ./storage/redis:/data
+      - ./storage/redis:/data"
