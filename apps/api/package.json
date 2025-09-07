@@ -1,0 +1,23 @@
+{
+  "name": "@p5/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node -r dotenv/config --watch ./src/index.js",
+    "start": "node -r dotenv/config ./src/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "fastify": "4.29.1",
+    "@fastify/cors": "9.0.1",
+    "@fastify/rate-limit": "8.1.1",
+    "@prisma/client": "5.22.0",
+    "pino-pretty": "11.2.2",
+    "dotenv": "16.4.5"
+  },
+  "devDependencies": {
+    "vitest": "2.0.5",
+    "supertest": "7.0.0"
+  }
+}

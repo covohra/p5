@@ -1,0 +1,8 @@
+.git 
+node_modules 
+.pnpm-store p\
+roject-snapshot 
+storage 
+.prisma .\
+env 
+.env.*

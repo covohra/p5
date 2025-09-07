@@ -1,3 +1,4 @@
+# docker-compose.yml
 services:
   postgres:
     image: postgres:16-alpine
@@ -8,15 +9,63 @@ services:
       POSTGRES_PASSWORD: p5pass
       POSTGRES_DB: p5db
     ports:
-      - "55432:5432"   # host:container (you chose 55432 on host)
+      - "55432:5432"
     volumes:
       - ./storage/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U p5 -d p5db"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
   redis:
     image: redis:7-alpine
     container_name: p5-redis
     restart: unless-stopped
+    command: ["redis-server","--appendonly","yes"]
     ports:
       - "6379:6379"
     volumes:
-      - ./storage/redis:/data"
+      - ./storage/redis:/data
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: p5-mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025"   # Web UI
+      - "1025:1025"   # SMTP
+
+  api:
+    container_name: p5-api
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      # DB inside compose network
+      DATABASE_URL: postgresql://p5:p5pass@postgres:5432/p5db?schema=public
+
+      # App
+      NODE_ENV: development
+      PORT: 3000
+
+      # Rate limit
+      RATE_LIMIT_MAX: 100
+      RATE_LIMIT_TIME_WINDOW: 1 minute
+
+      # Redis & SMTP for when we hook them up in code
+      REDIS_URL: redis://redis:6379/0
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_USER: ""
+      SMTP_PASS: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      mailpit:
+        condition: service_started
+    ports:
+      - "3000:3000"
