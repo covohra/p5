@@ -1,12 +1,16 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
-import { PrismaClient } from '@prisma/client'
+import pkg from '@prisma/client'
+const { PrismaClient } = pkg
 
 export function buildApp() {
   const app = Fastify({ logger: true })
+
+  // CORS
   app.register(cors, { origin: true })
 
+  // Prisma
   const prisma = new PrismaClient()
   app.decorate('prisma', prisma)
 
@@ -21,10 +25,10 @@ export function buildApp() {
     }
   })
 
-  // API (rate limited)
+  // API with scoped rate limit
   app.register(async (api) => {
+    // NOTE: On Fastify v5 + rate-limit v10, you don’t need/shouldn’t set { global:true } here.
     await api.register(rateLimit, {
-      global: true,
       max: Number(process.env.RATE_LIMIT_MAX ?? 100),
       timeWindow: process.env.RATE_LIMIT_TIME_WINDOW ?? '1 minute'
     })
@@ -41,6 +45,18 @@ export function buildApp() {
             email: { type: 'string', format: 'email', maxLength: 254 },
             name: { type: 'string', minLength: 1, maxLength: 120, nullable: true }
           }
+        },
+        response: {
+          201: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              email: { type: 'string' },
+              name: { type: ['string', 'null'] },
+              createdAt: { type: 'string' },
+              updatedAt: { type: 'string' }
+            }
+          }
         }
       },
       handler: async (req, reply) => {
@@ -51,6 +67,9 @@ export function buildApp() {
     })
   }, { prefix: '/api' })
 
-  app.addHook('onClose', async () => { await prisma.$disconnect() })
+  app.addHook('onClose', async () => {
+    await prisma.$disconnect()
+  })
+
   return app
 }

@@ -1,8 +1,27 @@
-.git 
-node_modules 
-.pnpm-store p\
-roject-snapshot 
-storage 
-.prisma .\
-env 
+# Git
+.git
+.gitignore
+
+# Node / pnpm
+**/node_modules
+**/.pnpm-store
+pnpm-debug.log*
+
+# Local env
+.env
 .env.*
+
+# Prisma cache
+.prisma
+
+# Runtime / storage
+storage
+dump.rdb
+postmaster.pid
+
+# Snapshots / misc
+project-snapshot
+
+# Docker configs (not needed inside image)
+Dockerfile
+docker-compose.yml

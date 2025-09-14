@@ -1,29 +1,40 @@
-# ---------- deps ----------
-FROM node:20-slim AS deps
-ENV PNPM_HOME=/root/.pnpm
-ENV PATH=$PNPM_HOME:$PATH
+# ---------- build ----------
+FROM node:20-slim AS build
+WORKDIR /repo
+
+# OS deps + pnpm
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
+
+# Install from lockfile for all workspaces (gets prisma CLI via devDeps)
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY prisma/package.json prisma/package.json
+RUN pnpm install --recursive --frozen-lockfile
+
+# Copy sources
+COPY apps apps
+COPY prisma prisma
+
+# Move into the API workspace and install its deps from the already-fetched store
+WORKDIR /repo/apps/api
+RUN pnpm install --offline --frozen-lockfile
+
+# Don't let prisma auto-install; generate client using the shared schema
+ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=1
+RUN pnpm exec prisma generate --schema ../../prisma/schema.prisma
+
+# Prune to production deps (keeps generated .prisma client)
+RUN pnpm prune --prod
+
+# ---------- runtime ----------
+FROM node:20-slim AS runtime
 WORKDIR /app
-
-COPY pnpm-lock.yaml ./
-COPY package.json ./
-COPY apps/api/package.json ./apps/api/package.json
-COPY prisma ./prisma
-
-RUN pnpm fetch
-RUN pnpm install --frozen-lockfile
-
-# ---------- runner ----------
-FROM node:20-slim AS runner
 ENV NODE_ENV=production
-WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY prisma ./prisma
-COPY apps/api ./apps/api
-COPY package.json pnpm-lock.yaml ./
+# Copy the pruned app (with node_modules and generated client)
+COPY --from=build /repo/apps/api /app
 
-RUN npx prisma generate
-
+ENV PORT=3000
 EXPOSE 3000
-CMD [ "node", "apps/api/src/index.js" ]
+CMD ["node", "-r", "dotenv/config", "./src/index.js"]

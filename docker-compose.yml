@@ -46,6 +46,13 @@ services:
       # DB inside compose network
       DATABASE_URL: postgresql://p5:p5pass@postgres:5432/p5db?schema=public
 
+      # Optional Redis & SMTP for later use
+      REDIS_URL: redis://redis:6379/0
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_USER: ""
+      SMTP_PASS: ""
+
       # App
       NODE_ENV: development
       PORT: 3000
@@ -53,13 +60,6 @@ services:
       # Rate limit
       RATE_LIMIT_MAX: 100
       RATE_LIMIT_TIME_WINDOW: 1 minute
-
-      # Redis & SMTP for when we hook them up in code
-      REDIS_URL: redis://redis:6379/0
-      SMTP_HOST: mailpit
-      SMTP_PORT: "1025"
-      SMTP_USER: ""
-      SMTP_PASS: ""
     depends_on:
       postgres:
         condition: service_healthy

@@ -11,17 +11,13 @@
     "db:up": "docker compose up -d",
     "db:down": "docker compose down -v",
     "db:ps": "docker compose ps",
-
     "sanity": "pwsh ./scripts/sanity-check.ps1",
     "db:reset": "pwsh ./scripts/db-reset.ps1",
-
     "prisma:generate": "pnpm --filter @p5/prisma run generate",
     "prisma:migrate": "pnpm --filter @p5/prisma run migrate",
     "prisma:seed": "pnpm --filter @p5/prisma run seed",
     "db:smoke": "pnpm --filter @p5/prisma exec node ./scripts/db-smoke.cjs",
-
     "snapshot": "pwsh -NoProfile -ExecutionPolicy Bypass ./scripts/make-snapshot.ps1",
-
     "api": "pnpm --dir apps/api run dev",
     "api:start": "pnpm --dir apps/api run start",
     "test": "pnpm --dir apps/api run test"
@@ -30,6 +26,12 @@
     "overrides": {
       "prisma": "5.22.0",
       "@prisma/client": "5.22.0"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma"
+    ]
   }
 }
