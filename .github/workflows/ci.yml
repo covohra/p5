@@ -33,9 +33,9 @@ jobs:
       DATABASE_URL: postgresql://p5:p5pass@localhost:5432/p5db?schema=public&sslmode=disable
       RATE_LIMIT_MAX: "100"
       RATE_LIMIT_TIME_WINDOW: "1 minute"
-      # 👇 make prisma write the client where @p5/api expects it
-      PRISMA_CLIENT_OUTPUT: ./apps/api/node_modules/.prisma/client
-      # (optional) avoid auto-install during postinstall
+      # prisma client must be emitted where @p5/api expects it
+      # (path is *from inside* the prisma package)
+      PRISMA_CLIENT_OUTPUT: ../apps/api/node_modules/.prisma/client
       PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
 
     steps:
@@ -54,10 +54,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Prisma generate
-        run: pnpm --filter @p5/prisma exec prisma generate --schema prisma/schema.prisma
+        run: pnpm --filter @p5/prisma exec prisma generate --schema ./schema.prisma
 
       - name: Prisma migrate (deploy)
-        run: pnpm --filter @p5/prisma exec prisma migrate deploy --schema prisma/schema.prisma
+        run: pnpm --filter @p5/prisma exec prisma migrate deploy --schema ./schema.prisma
 
       - name: Run tests
         run: pnpm --filter @p5/api test
