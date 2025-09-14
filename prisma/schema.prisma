@@ -2,6 +2,7 @@ generator client {
   provider = "prisma-client-js"
   // We'll point this at the deployed bundle during the Docker build
   output   = env("PRISMA_CLIENT_OUTPUT")
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {

@@ -2,8 +2,8 @@
 FROM node:20-slim AS build
 WORKDIR /repo
 
-# OS deps + pnpm
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+# OS deps + pnpm (install libssl3 so Prisma can detect openssl-3.0)
+RUN apt-get update -y && apt-get install -y openssl libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 
 # Install workspace (gets Prisma CLI via devDeps)
@@ -17,7 +17,6 @@ COPY apps apps
 COPY prisma prisma
 
 # Create a pruned, self-contained prod bundle for ONLY @p5/api
-# (--legacy makes node_modules standalone, not linked to store)
 RUN pnpm deploy --filter @p5/api --prod --legacy /out
 
 # Generate Prisma client into the deployed bundle
@@ -30,6 +29,9 @@ RUN pnpm exec prisma generate --schema ./schema.prisma
 FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+
+# Ensure runtime has libssl3 as well
+RUN apt-get update -y && apt-get install -y libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copy the deployed app with standalone node_modules AND generated client
 COPY --from=build /out /app
