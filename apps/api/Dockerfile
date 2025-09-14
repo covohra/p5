@@ -6,7 +6,7 @@ WORKDIR /repo
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 
-# Install from lockfile for all workspaces (gets prisma CLI via devDeps)
+# Install from lockfile for all workspaces (gets Prisma CLI via devDeps)
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY prisma/package.json prisma/package.json
@@ -16,24 +16,23 @@ RUN pnpm install --recursive --frozen-lockfile
 COPY apps apps
 COPY prisma prisma
 
-# ---- Generate Prisma client from the prisma workspace ----
-# (schema outputs to ../apps/api/node_modules/.prisma/client)
+# Generate Prisma client from the prisma workspace (output goes into apps/api/.prisma)
 WORKDIR /repo/prisma
 RUN pnpm install --offline --frozen-lockfile
-ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=1
 RUN pnpm exec prisma generate --schema ./schema.prisma
 
-# ---- Prune the API to production deps (keeps generated .prisma) ----
-WORKDIR /repo/apps/api
-RUN pnpm prune --prod
+# Create a pruned, self-contained prod bundle FOR ONLY @p5/api
+# (--legacy makes pnpm produce a node_modules that doesn't rely on the global store)
+WORKDIR /repo
+RUN pnpm deploy --filter @p5/api --prod --legacy /out
 
 # ---------- runtime ----------
 FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Copy the pruned app (with node_modules and generated client)
-COPY --from=build /repo/apps/api /app
+# Copy the deployed app (with standalone node_modules and generated .prisma)
+COPY --from=build /out /app
 
 ENV PORT=3000
 EXPOSE 3000
