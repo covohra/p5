@@ -33,9 +33,6 @@ jobs:
       DATABASE_URL: postgresql://p5:p5pass@localhost:5432/p5db?schema=public&sslmode=disable
       RATE_LIMIT_MAX: "100"
       RATE_LIMIT_TIME_WINDOW: "1 minute"
-      # prisma client must be emitted where @p5/api expects it
-      # (path is *from inside* the prisma package)
-      PRISMA_CLIENT_OUTPUT: ../apps/api/node_modules/.prisma/client
       PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
 
     steps:
@@ -53,15 +50,22 @@ jobs:
       - name: Install deps (lockfile)
         run: pnpm install --frozen-lockfile
 
-      - name: Prisma generate
-        run: pnpm --filter @p5/prisma exec prisma generate --schema ./schema.prisma
+      # 👇 Generate client into apps/api/node_modules/.prisma/client (API cwd)
+      - name: Prisma generate (into @p5/api)
+        run: |
+          cd apps/api
+          PRISMA_CLIENT_OUTPUT=./node_modules/.prisma/client \
+          pnpm --filter @p5/prisma exec prisma generate --schema ../../prisma/schema.prisma
+          ls -la ./node_modules/.prisma/client
 
+      # Migrations run from the prisma workspace (uses DATABASE_URL above)
       - name: Prisma migrate (deploy)
         run: pnpm --filter @p5/prisma exec prisma migrate deploy --schema ./schema.prisma
 
       - name: Run tests
         run: pnpm --filter @p5/api test
 
+      # Deploy only if tests pass
       - name: Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
