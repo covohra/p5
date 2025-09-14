@@ -1,5 +1,7 @@
 generator client {
   provider = "prisma-client-js"
+  // NOTE: this path is relative to prisma/schema.prisma
+  output   = "../apps/api/node_modules/.prisma/client"
 }
 
 datasource db {
@@ -13,5 +15,4 @@ model User {
   name      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
 }

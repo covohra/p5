@@ -16,15 +16,15 @@ RUN pnpm install --recursive --frozen-lockfile
 COPY apps apps
 COPY prisma prisma
 
-# Move into the API workspace and install its deps from the already-fetched store
-WORKDIR /repo/apps/api
+# ---- Generate Prisma client from the prisma workspace ----
+# (schema outputs to ../apps/api/node_modules/.prisma/client)
+WORKDIR /repo/prisma
 RUN pnpm install --offline --frozen-lockfile
-
-# Don't let prisma auto-install; generate client using the shared schema
 ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=1
-RUN pnpm exec prisma generate --schema ../../prisma/schema.prisma
+RUN pnpm exec prisma generate --schema ./schema.prisma
 
-# Prune to production deps (keeps generated .prisma client)
+# ---- Prune the API to production deps (keeps generated .prisma) ----
+WORKDIR /repo/apps/api
 RUN pnpm prune --prod
 
 # ---------- runtime ----------
