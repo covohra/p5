@@ -4,6 +4,7 @@ on:
   push:
     branches: [ main ]
 
+# cancel older runs of the same ref
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
@@ -13,6 +14,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
+    # Ephemeral Postgres for tests
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: p5
+          POSTGRES_PASSWORD: p5pass
+          POSTGRES_DB: p5db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U p5 -d p5db"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://p5:p5pass@localhost:5432/p5db?schema=public&sslmode=disable
+      RATE_LIMIT_MAX: "100"
+      RATE_LIMIT_TIME_WINDOW: "1 minute"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,7 +43,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
       - name: Install pnpm
         run: npm install -g pnpm
@@ -28,15 +51,21 @@ jobs:
       - name: Install deps (lockfile)
         run: pnpm install --frozen-lockfile
 
+      - name: Prisma generate
+        run: pnpm --filter @p5/prisma exec prisma generate --schema prisma/schema.prisma
+
+      - name: Prisma migrate (deploy)
+        run: pnpm --filter @p5/prisma exec prisma migrate deploy --schema prisma/schema.prisma
+
       - name: Run tests
         run: pnpm --filter @p5/api test
-        env:
-          NODE_ENV: test
 
+      # Deploy only if tests pass
       - name: Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
       - name: Deploy to Fly
-        run: flyctl deploy --remote-only --app p5-api
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          timeout 15m flyctl deploy --remote-only --app p5-api
