@@ -1,4 +1,5 @@
-app = "p5-api"        # 👈 choose a unique name, e.g. p5-api, faseeh-p5, etc.
+# fly.toml — p5 API
+app = "p5-api"              # <- keep if unique; change if Fly says it's taken
 primary_region = "iad"
 
 [build]
@@ -10,27 +11,26 @@ primary_region = "iad"
   RATE_LIMIT_MAX = "100"
   RATE_LIMIT_TIME_WINDOW = "1 minute"
 
-[[services]]
+[http_service]
   internal_port = 3000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
   processes = ["app"]
-  protocol = "tcp"
 
-  [services.concurrency]
+  [http_service.concurrency]
     type = "connections"
     soft_limit = 25
     hard_limit = 50
 
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-  [[services.http_checks]]
-    path = "/ready"
-    method = "get"
+  [[http_service.checks]]
     interval = "10s"
     timeout = "2s"
     grace_period = "20s"
+    method = "get"
+    path = "/ready"
+
+[vm]
+  size = "shared-cpu-1x"
+  memory = "512MB"
