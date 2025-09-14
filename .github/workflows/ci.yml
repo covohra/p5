@@ -12,18 +12,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 20 (with pnpm cache)
+      - name: Setup Node 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
 
-      # Use Corepack to activate pnpm on the runner
-      - name: Enable pnpm via Corepack
+      - name: Install pnpm globally
         run: |
-          corepack enable
-          # lock to the version you use locally; change if needed
-          corepack prepare pnpm@10.15.0 --activate
+          npm install -g pnpm@10.15.0
           pnpm --version
 
       - name: Install dependencies
@@ -37,7 +33,7 @@ jobs:
           curl -L https://fly.io/install.sh | sh
           echo "${HOME}/.fly/bin" >> $GITHUB_PATH
 
-      - name: Deploy to Fly (remote build)
+      - name: Deploy to Fly
         run: flyctl deploy --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
