@@ -4,7 +4,6 @@ on:
   push:
     branches: [ main ]
 
-# cancel older runs of the same ref
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
@@ -14,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
-    # Ephemeral Postgres for tests
     services:
       postgres:
         image: postgres:16
@@ -47,7 +45,14 @@ jobs:
           node-version: 20
           cache: pnpm
 
-      # Cache pnpm store to speed up installs across runs
+      # ✅ Install pnpm the reliable way (adds to PATH)
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      # Optional: cache pnpm store to speed up re-runs
       - name: Cache pnpm store
         id: pnpm-cache
         uses: actions/cache@v4
@@ -57,15 +62,12 @@ jobs:
           restore-keys: |
             pnpm-store-${{ runner.os }}-
 
-      - name: Install pnpm
-        run: npm install -g pnpm
-
       - name: Install deps (lockfile, with retries)
         run: |
           pnpm install --frozen-lockfile --reporter=append \
             --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-maxtimeout=60000
 
-      # Generate Prisma client into API’s node_modules
+      # Generate Prisma client directly into API node_modules
       - name: Prisma generate (into @p5/api)
         working-directory: apps/api
         env:
@@ -74,15 +76,13 @@ jobs:
           pnpm --filter @p5/prisma exec prisma generate --schema ../../prisma/schema.prisma
           ls -la ./node_modules/.prisma/client
 
-      # Apply migrations to the ephemeral CI DB
-      - name: Prisma migrate (deploy)
+      - name: Prisma migrate (deploy to ephemeral DB)
         working-directory: prisma
         run: pnpm exec prisma migrate deploy --schema ./schema.prisma
 
       - name: Run tests
         run: pnpm --filter @p5/api test
 
-      # Deploy only if tests pass
       - name: Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
