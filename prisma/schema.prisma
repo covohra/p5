@@ -1,7 +1,7 @@
 generator client {
   provider = "prisma-client-js"
-  // NOTE: this path is relative to prisma/schema.prisma
-  output   = "../apps/api/node_modules/.prisma/client"
+  // We'll point this at the deployed bundle during the Docker build
+  output   = env("PRISMA_CLIENT_OUTPUT")
 }
 
 datasource db {
