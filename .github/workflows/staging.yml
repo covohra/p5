@@ -1,8 +1,8 @@
-name: staging
+name: staging - test + deploy + smoke
 
 on:
   push:
-    branches-ignore: [ main ]  # anything not main goes to staging
+    branches-ignore: [ main ]   # everything except main goes to staging
 
 concurrency:
   group: staging-${{ github.ref }}
@@ -11,7 +11,7 @@ concurrency:
 jobs:
   test-and-deploy-staging:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     services:
       postgres:
@@ -35,59 +35,92 @@ jobs:
       RATE_LIMIT_TIME_WINDOW: "1 minute"
       PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
       PRISMA_CLIENT_OUTPUT: ${{ github.workspace }}/apps/api/node_modules/.prisma/client
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
     steps:
-      - name: Checkout
+      - name: 🧾 Checkout
         uses: actions/checkout@v4
 
-      - name: Node 20
+      - name: 🔧 Node 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: pnpm (from package.json)
+      - name: 📦 pnpm (from package.json)
         uses: pnpm/action-setup@v4
         with:
           run_install: false
 
-      - name: Install deps (no postinstall)
+      - name: 📥 Install deps (no postinstall)
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Prisma generate (into API)
-        working-directory: prisma
+      - name: 🔨 Prisma generate (into API package)
         run: |
-          pnpm exec prisma generate --schema ./schema.prisma
+          pnpm --filter @p5/prisma exec prisma generate --schema ./prisma/schema.prisma
           ls -la "${PRISMA_CLIENT_OUTPUT}"
 
-      - name: Prisma migrate (deploy)
-        working-directory: prisma
+      - name: 🗄️ Migrate ephemeral Postgres
         env:
           PRISMA_MIGRATE_SKIP_GENERATE: "1"
-        run: pnpm exec prisma migrate deploy --schema ./schema.prisma
+        run: |
+          pnpm --filter @p5/prisma exec prisma migrate deploy --schema ./prisma/schema.prisma
 
-      - name: Run tests
+      - name: 🧪 Run tests
         run: pnpm --filter @p5/api test
 
-      - name: Setup Flyctl
+      - name: 🛫 Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
-      - name: Deploy to Fly (staging)
-        run: flyctl deploy --remote-only -c fly.staging.toml --app p5-api-staging
+      - name: 🚀 Deploy to Fly (staging)
+        if: ${{ success() }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: timeout 15m flyctl deploy --remote-only --app p5-api-staging
 
-      - name: Smoke test staging
+      # -----------------------
+      # Post-deploy smoke test
+      # -----------------------
+      - name: 🔎 Install jq (for JSON parsing)
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: 🩺 Smoke test against staging
         env:
           APP_URL: https://p5-api-staging.fly.dev
+        shell: bash
         run: |
-          echo "Probing $APP_URL/health ..."
-          for i in {1..30}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/health" || true)
+          set -euo pipefail
+
+          echo "Probing $APP_URL/ready until 200..."
+          for i in {1..45}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/ready" || true)
             if [ "$code" = "200" ]; then
-              echo "Health check OK (200)."
-              exit 0
+              echo "Ready check OK."
+              break
             fi
-            echo "Attempt $i/30 ... got $code, retrying in 2s"
+            echo "Attempt $i/45 ... got $code, sleeping 2s"
             sleep 2
           done
-          echo "Health check failed after retries."
-          exit 1
+
+          # Verify health and version
+          echo "Health:"  && curl -s "$APP_URL/health"
+          echo "Version:" && curl -s "$APP_URL/version"
+
+          # Create a user
+          email="ci-stg-$(date +%s)@example.com"
+          echo "Creating user: $email"
+          created=$(curl -s -H "Content-Type: application/json" \
+            --data "{\"email\":\"$email\",\"name\":\"Staging Smoke\"}" \
+            "$APP_URL/api/users")
+          echo "Created: $created"
+
+          id=$(echo "$created" | jq -r '.id')
+          [ -n "$id" ] && [ "$id" != "null" ] || { echo "❌ No user id returned"; exit 1; }
+
+          # List and assert presence
+          list=$(curl -s "$APP_URL/api/users")
+          echo "$list" | jq -r '.[].email' | grep -q "$email" || { echo "❌ user not found in list"; exit 1; }
+
+          # Delete
+          delCode=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$APP_URL/api/users/$id")
+          [ "$delCode" = "204" ] || { echo "❌ delete failed with $delCode"; exit 1; }
+
+          echo "✅ Staging smoke test passed."
