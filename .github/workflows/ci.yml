@@ -1,4 +1,3 @@
-# .github/workflows/ci.yml
 name: test + deploy
 
 on:
@@ -40,15 +39,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 20 (no built-in pnpm cache)
+      - name: Setup Node 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
+      # Let the action pick pnpm version from package.json "packageManager"
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
           run_install: false
 
       - name: Verify pnpm
@@ -57,16 +56,16 @@ jobs:
       - name: Install deps (lockfile)
         run: pnpm install --frozen-lockfile
 
-      # Generate Prisma client into the API package's node_modules
+      # Generate Prisma client into the API package (so tests can import it)
       - name: Prisma generate (into @p5/api)
         working-directory: apps/api
         env:
           PRISMA_CLIENT_OUTPUT: ./node_modules/.prisma/client
         run: |
           pnpm --filter @p5/prisma exec prisma generate --schema ../../prisma/schema.prisma
-          test -f ./node_modules/.prisma/client/index.js && echo "✅ client generated"
+          test -f ./node_modules/.prisma/client/index.js && echo "✅ Prisma client generated"
 
-      # Apply migrations against the ephemeral Postgres
+      # Apply migrations on the ephemeral Postgres service
       - name: Prisma migrate (deploy)
         working-directory: prisma
         run: pnpm exec prisma migrate deploy --schema ./schema.prisma
