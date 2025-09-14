@@ -4,7 +4,6 @@ on:
   push:
     branches: [ main ]
 
-# Cancel any previous run of this ref
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
@@ -22,13 +21,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
 
-      - name: Enable pnpm via corepack
-        run: |
-          corepack enable
-          corepack prepare pnpm@latest --activate
-          pnpm --version
+      - name: Install pnpm
+        run: npm install -g pnpm
 
       - name: Install deps (lockfile)
         run: pnpm install --frozen-lockfile
