@@ -4,7 +4,6 @@ on:
   push:
     branches: [ main ]
 
-# cancel older runs of the same ref
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
@@ -14,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
-    # Ephemeral Postgres for tests
     services:
       postgres:
         image: postgres:16
@@ -35,6 +33,10 @@ jobs:
       DATABASE_URL: postgresql://p5:p5pass@localhost:5432/p5db?schema=public&sslmode=disable
       RATE_LIMIT_MAX: "100"
       RATE_LIMIT_TIME_WINDOW: "1 minute"
+      # 👇 make prisma write the client where @p5/api expects it
+      PRISMA_CLIENT_OUTPUT: ./apps/api/node_modules/.prisma/client
+      # (optional) avoid auto-install during postinstall
+      PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
 
     steps:
       - name: Checkout
@@ -60,12 +62,10 @@ jobs:
       - name: Run tests
         run: pnpm --filter @p5/api test
 
-      # Deploy only if tests pass
       - name: Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
       - name: Deploy to Fly
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          timeout 15m flyctl deploy --remote-only --app p5-api
+        run: timeout 15m flyctl deploy --remote-only --app p5-api
