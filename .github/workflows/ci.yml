@@ -44,7 +44,7 @@ jobs:
         with:
           node-version: 20
 
-      # Use pnpm version from your package.json "packageManager"
+      # Use the pnpm version from package.json "packageManager"
       - name: 📦 pnpm setup
         uses: pnpm/action-setup@v4
         with:
@@ -56,20 +56,20 @@ jobs:
       - name: 📥 Install deps (lockfile)
         run: pnpm install --frozen-lockfile
 
+      # 🔑 CRITICAL: generate client from the API cwd so @prisma/client can import
       - name: 🔨 Prisma generate into API package
-        env:
-          PRISMA_CLIENT_OUTPUT: apps/api/node_modules/.prisma/client
         run: |
-          echo "::group::prisma generate"
-          pnpm --filter @p5/prisma exec prisma generate --schema prisma/schema.prisma
-          ls -la apps/api/node_modules/.prisma/client || true
-          echo "::endgroup::"
+          set -euxo pipefail
+          cd apps/api
+          export PRISMA_CLIENT_OUTPUT=./node_modules/.prisma/client
+          timeout 3m pnpm --filter @p5/prisma exec prisma generate --schema ../../prisma/schema.prisma
+          echo "== contents of .prisma/client =="
+          ls -la ./node_modules/.prisma/client
 
       - name: 🗄️ Migrate ephemeral Postgres
         run: |
-          echo "::group::prisma migrate deploy"
-          pnpm --filter @p5/prisma exec prisma migrate deploy --schema prisma/schema.prisma
-          echo "::endgroup::"
+          set -euxo pipefail
+          timeout 3m pnpm --filter @p5/prisma exec prisma migrate deploy --schema prisma/schema.prisma
 
       - name: 🧪 Run tests
         run: pnpm --filter @p5/api test
