@@ -2,17 +2,31 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
 import pkg from '@prisma/client'
+import { getVersionInfo } from './version.js'   // ← add this file if you haven't
 const { PrismaClient } = pkg
 
 export function buildApp() {
   const app = Fastify({ logger: true })
 
-  // CORS
-  app.register(cors, { origin: true })
+  // CORS: allowlist via env (comma-separated), or '*' for all.
+  // Also allow no-origin (curl, health checks).
+  const corsOrigins = (process.env.CORS_ORIGINS || '*')
+    .split(',')
+    .map(s => s.trim())
+  app.register(cors, {
+    origin(origin, cb) {
+      if (!origin) return cb(null, true) // allow CLI tools
+      const ok = corsOrigins.includes('*') || corsOrigins.includes(origin)
+      cb(null, ok)
+    }
+  })
 
   // Prisma
   const prisma = new PrismaClient()
   app.decorate('prisma', prisma)
+
+  // Version (for deploy tracing)
+  app.get('/version', async () => getVersionInfo())
 
   // Probes (no rate limit)
   app.get('/health', async () => ({ ok: true, time: new Date().toISOString() }))
@@ -27,7 +41,6 @@ export function buildApp() {
 
   // API with scoped rate limit
   app.register(async (api) => {
-    // NOTE: On Fastify v5 + rate-limit v10, you don’t need/shouldn’t set { global:true } here.
     await api.register(rateLimit, {
       max: Number(process.env.RATE_LIMIT_MAX ?? 100),
       timeWindow: process.env.RATE_LIMIT_TIME_WINDOW ?? '1 minute'
@@ -83,7 +96,6 @@ export function buildApp() {
           await prisma.user.delete({ where: { id } })
           return reply.code(204).send()
         } catch (err) {
-          // Prisma P2025 = record not found
           if (err?.code === 'P2025') {
             return reply.code(404).send({ message: 'User not found' })
           }
