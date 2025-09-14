@@ -1,39 +1,49 @@
-name: CI
+name: test + deploy
 
 on:
   push:
     branches: [ main ]
 
+# Cancel any previous run of this ref
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 20
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20'
+          cache: 'pnpm'
 
-      - name: Install pnpm globally
+      - name: Enable pnpm via corepack
         run: |
-          npm install -g pnpm@10.15.0
+          corepack enable
+          corepack prepare pnpm@latest --activate
           pnpm --version
 
-      - name: Install dependencies
+      - name: Install deps (lockfile)
         run: pnpm install --frozen-lockfile
 
       - name: Run tests
         run: pnpm --filter @p5/api test
-
-      - name: Install flyctl
-        run: |
-          curl -L https://fly.io/install.sh | sh
-          echo "${HOME}/.fly/bin" >> $GITHUB_PATH
+        env:
+          # If you ever use DB in tests, wire env here
+          NODE_ENV: test
 
       - name: Deploy to Fly
-        run: flyctl deploy --remote-only
+        uses: superfly/flyctl-actions/setup-flyctl@v2
+      - name: flyctl deploy
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          # add a hard timeout so it can't hang forever
+          timeout 15m flyctl deploy --remote-only --app p5-api --build-only=false
