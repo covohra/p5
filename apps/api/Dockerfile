@@ -41,3 +41,5 @@ COPY --from=build /out /app
 ENV PORT=3000
 EXPOSE 3000
 CMD ["node", "-r", "dotenv/config", "./src/index.js"]
+# Vector config (optional; harmless if unused)
+COPY ops/vector.toml /etc/vector/vector.toml

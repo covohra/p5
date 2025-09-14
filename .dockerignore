@@ -25,3 +25,10 @@ project-snapshot
 # Docker configs (not needed inside image)
 Dockerfile
 docker-compose.yml
+prisma/.env
+**/test
+*/.spec.*
+*/.test.*
+coverage
+.vscode
+.DS_Store
