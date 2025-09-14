@@ -39,22 +39,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node (with pnpm cache)
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
+          # IMPORTANT: do NOT set cache: pnpm here
 
-      # ✅ Install pnpm the reliable way (adds to PATH)
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
           run_install: false
 
-      # Optional: cache pnpm store to speed up re-runs
       - name: Cache pnpm store
-        id: pnpm-cache
         uses: actions/cache@v4
         with:
           path: ~/.pnpm-store
@@ -62,12 +59,11 @@ jobs:
           restore-keys: |
             pnpm-store-${{ runner.os }}-
 
-      - name: Install deps (lockfile, with retries)
+      - name: Install deps (lockfile)
         run: |
           pnpm install --frozen-lockfile --reporter=append \
             --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-maxtimeout=60000
 
-      # Generate Prisma client directly into API node_modules
       - name: Prisma generate (into @p5/api)
         working-directory: apps/api
         env:
