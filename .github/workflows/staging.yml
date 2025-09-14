@@ -1,0 +1,93 @@
+name: staging
+
+on:
+  push:
+    branches-ignore: [ main ]  # anything not main goes to staging
+
+concurrency:
+  group: staging-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-deploy-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: p5
+          POSTGRES_PASSWORD: p5pass
+          POSTGRES_DB: p5db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U p5 -d p5db"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://p5:p5pass@localhost:5432/p5db?schema=public&sslmode=disable
+      RATE_LIMIT_MAX: "100"
+      RATE_LIMIT_TIME_WINDOW: "1 minute"
+      PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
+      PRISMA_CLIENT_OUTPUT: ${{ github.workspace }}/apps/api/node_modules/.prisma/client
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: pnpm (from package.json)
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install deps (no postinstall)
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Prisma generate (into API)
+        working-directory: prisma
+        run: |
+          pnpm exec prisma generate --schema ./schema.prisma
+          ls -la "${PRISMA_CLIENT_OUTPUT}"
+
+      - name: Prisma migrate (deploy)
+        working-directory: prisma
+        env:
+          PRISMA_MIGRATE_SKIP_GENERATE: "1"
+        run: pnpm exec prisma migrate deploy --schema ./schema.prisma
+
+      - name: Run tests
+        run: pnpm --filter @p5/api test
+
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@v1
+
+      - name: Deploy to Fly (staging)
+        run: flyctl deploy --remote-only -c fly.staging.toml --app p5-api-staging
+
+      - name: Smoke test staging
+        env:
+          APP_URL: https://p5-api-staging.fly.dev
+        run: |
+          echo "Probing $APP_URL/health ..."
+          for i in {1..30}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/health" || true)
+            if [ "$code" = "200" ]; then
+              echo "Health check OK (200)."
+              exit 0
+            fi
+            echo "Attempt $i/30 ... got $code, retrying in 2s"
+            sleep 2
+          done
+          echo "Health check failed after retries."
+          exit 1

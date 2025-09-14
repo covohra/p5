@@ -1,0 +1,41 @@
+name: preview (per PR)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+jobs:
+  deploy-preview:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@v1
+
+      - name: Deploy PR preview
+        run: |
+          APP="p5-api-pr-${{ github.event.number }}"
+          echo "Deploying preview app $APP..."
+          flyctl deploy --remote-only --app "$APP" --image-label "pr-${{ github.event.number }}-${{ github.sha }}"
+          echo "Preview available at https://$APP.fly.dev"
+
+  cleanup-preview:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@v1
+      - name: Destroy preview app
+        run: |
+          APP="p5-api-pr-${{ github.event.number }}"
+          echo "Destroying preview app $APP..."
+          flyctl apps destroy "$APP" --yes
