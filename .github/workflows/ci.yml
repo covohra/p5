@@ -20,8 +20,7 @@ jobs:
           POSTGRES_USER: p5
           POSTGRES_PASSWORD: p5pass
           POSTGRES_DB: p5db
-        ports:
-          - 5432:5432
+        ports: [ "5432:5432" ]
         options: >-
           --health-cmd="pg_isready -U p5 -d p5db"
           --health-interval=10s
@@ -39,29 +38,43 @@ jobs:
       - name: 🧾 Checkout
         uses: actions/checkout@v4
 
-      - name: 🔧 Setup Node 20
+      - name: 🔧 Node 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: 📦 Setup pnpm (use version from package.json)
+      - name: 📦 pnpm setup (from package.json)
         uses: pnpm/action-setup@v4
         with:
           run_install: false
 
-      - name: 📥 Install deps (no postinstall scripts)
+      - name: 📥 Install deps (no postinstall)
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      # Generate Prisma client directly into apps/api/.prisma using ABSOLUTE path
-      - name: 🔨 Prisma generate into API
-        env:
-          PRISMA_CLIENT_OUTPUT: ${{ github.workspace }}/apps/api/node_modules/.prisma/client
-        run: pnpm --filter @p5/prisma run generate
+      # Generate Prisma client into apps/api/.prisma using absolute paths
+      - name: 🔨 Prisma generate (absolute paths)
+        run: |
+          set -euxo pipefail
+          export GWS="${GITHUB_WORKSPACE}"
 
-      - name: 🗄️ Apply migrations to ephemeral Postgres
+          # absolute output dir (what @prisma/client expects)
+          export PRISMA_CLIENT_OUTPUT="$GWS/apps/api/node_modules/.prisma/client"
+
+          # absolute schema path
+          SCHEMA="$GWS/prisma/schema.prisma"
+
+          pnpm -w exec prisma generate --schema "$SCHEMA"
+
+          echo "== generated files =="
+          ls -la "$PRISMA_CLIENT_OUTPUT"
+
+      # Apply migrations to the ephemeral Postgres (skip generate here)
+      - name: 🗄️ Migrate (deploy)
         env:
           PRISMA_MIGRATE_SKIP_GENERATE: "1"
-        run: pnpm --filter @p5/prisma run migrate:deploy
+        run: |
+          set -euxo pipefail
+          pnpm -w exec prisma migrate deploy --schema "$GITHUB_WORKSPACE/prisma/schema.prisma"
 
       - name: 🧪 Run tests
         run: pnpm --filter @p5/api test
