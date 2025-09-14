@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    # Ephemeral Postgres for tests
     services:
       postgres:
         image: postgres:16
@@ -34,47 +35,56 @@ jobs:
       RATE_LIMIT_MAX: "100"
       RATE_LIMIT_TIME_WINDOW: "1 minute"
       PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
-      # IMPORTANT: generate client where @prisma/client (root) expects it
+      # Generate Prisma client where @prisma/client expects it (repo root node_modules)
       PRISMA_CLIENT_OUTPUT: ${{ github.workspace }}/node_modules/.prisma/client
 
     steps:
-      - name: 🧾 Checkout
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 🔧 Node 20
+      - name: Node 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: 📦 pnpm (use package.json's packageManager)
+      # Use pnpm version from package.json "packageManager"
+      - name: pnpm setup
         uses: pnpm/action-setup@v4
         with:
           run_install: false
 
-      - name: 📥 Install deps (no postinstall)
+      - name: Install deps (no postinstall)
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      # Generate Prisma client at repo root node_modules/.prisma/client
-      - name: 🔨 Prisma generate (root .prisma)
+      # Run Prisma from the @p5/prisma workspace (CWD == prisma/)
+      - name: Prisma generate (into root .prisma/client)
         run: |
           pnpm --filter @p5/prisma exec prisma generate --schema ./schema.prisma
-          echo "== contents of root .prisma/client =="
+          echo "== contents of root node_modules/.prisma/client =="
           ls -la "${PRISMA_CLIENT_OUTPUT}"
 
-      # Apply migrations to ephemeral Postgres
-      - name: 🗄️ Prisma migrate (deploy)
+      - name: Prisma migrate (deploy)
         env:
           PRISMA_MIGRATE_SKIP_GENERATE: "1"
         run: |
           pnpm --filter @p5/prisma exec prisma migrate deploy --schema ./schema.prisma
 
-      - name: 🧪 Run tests
+      - name: Run tests
         run: pnpm --filter @p5/api test
 
-      - name: 🛫 Setup Flyctl
+      - name: Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
-      - name: 🚀 Deploy to Fly
+      - name: Verify Fly token is present
+        run: |
+          if [ -z "${FLY_API_TOKEN}" ]; then
+            echo "FLY_API_TOKEN is missing. Add it in GitHub → Settings → Secrets → Actions."
+            exit 1
+          fi
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy to Fly
         if: ${{ success() }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
