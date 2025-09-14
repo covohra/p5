@@ -4,6 +4,7 @@ on:
   push:
     branches: [ main ]
 
+# cancel older runs of the same ref
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
@@ -13,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    # Ephemeral Postgres for tests
     services:
       postgres:
         image: postgres:16
@@ -20,7 +22,8 @@ jobs:
           POSTGRES_USER: p5
           POSTGRES_PASSWORD: p5pass
           POSTGRES_DB: p5db
-        ports: [ "5432:5432" ]
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd="pg_isready -U p5 -d p5db"
           --health-interval=10s
@@ -32,6 +35,7 @@ jobs:
       DATABASE_URL: postgresql://p5:p5pass@localhost:5432/p5db?schema=public&sslmode=disable
       RATE_LIMIT_MAX: "100"
       RATE_LIMIT_TIME_WINDOW: "1 minute"
+      # prevent postinstall auto-generate (we do it explicitly)
       PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
 
     steps:
@@ -43,38 +47,36 @@ jobs:
         with:
           node-version: 20
 
-      - name: 📦 pnpm setup (from package.json)
+      # Use pnpm version from package.json "packageManager"
+      - name: 📦 pnpm setup
         uses: pnpm/action-setup@v4
         with:
           run_install: false
 
+      - name: 🔎 pnpm -v
+        run: pnpm -v
+
+      # Install WITHOUT running postinstall (so prisma doesn't auto-run)
       - name: 📥 Install deps (no postinstall)
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      # Generate Prisma client into apps/api/.prisma using absolute paths
-      - name: 🔨 Prisma generate (absolute paths)
+      # Generate Prisma client INTO the API package using absolute paths
+      - name: 🔨 Prisma generate (from @p5/prisma -> into @p5/api)
+        env:
+          PRISMA_CLIENT_OUTPUT: ${{ github.workspace }}/apps/api/node_modules/.prisma/client
         run: |
           set -euxo pipefail
-          export GWS="${GITHUB_WORKSPACE}"
+          # run prisma CLI from the workspace that has it installed
+          pnpm --filter @p5/prisma exec prisma generate --schema prisma/schema.prisma
+          ls -la "${PRISMA_CLIENT_OUTPUT}"
 
-          # absolute output dir (what @prisma/client expects)
-          export PRISMA_CLIENT_OUTPUT="$GWS/apps/api/node_modules/.prisma/client"
-
-          # absolute schema path
-          SCHEMA="$GWS/prisma/schema.prisma"
-
-          pnpm -w exec prisma generate --schema "$SCHEMA"
-
-          echo "== generated files =="
-          ls -la "$PRISMA_CLIENT_OUTPUT"
-
-      # Apply migrations to the ephemeral Postgres (skip generate here)
+      # Apply migrations against the ephemeral Postgres
       - name: 🗄️ Migrate (deploy)
         env:
           PRISMA_MIGRATE_SKIP_GENERATE: "1"
         run: |
           set -euxo pipefail
-          pnpm -w exec prisma migrate deploy --schema "$GITHUB_WORKSPACE/prisma/schema.prisma"
+          pnpm --filter @p5/prisma exec prisma migrate deploy --schema prisma/schema.prisma
 
       - name: 🧪 Run tests
         run: pnpm --filter @p5/api test
