@@ -2,7 +2,7 @@
 FROM node:20-slim AS build
 WORKDIR /repo
 
-# OS deps + pnpm (install libssl3 so Prisma can detect openssl-3.0)
+# OS deps + pnpm (OpenSSL 3 for Prisma)
 RUN apt-get update -y && apt-get install -y openssl libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 
@@ -30,8 +30,10 @@ FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Ensure runtime has libssl3 as well
-RUN apt-get update -y && apt-get install -y libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
+# needed for healthcheck + prisma runtime
+RUN apt-get update -y \
+  && apt-get install -y wget ca-certificates libssl3 \
+  && rm -rf /var/lib/apt/lists/*
 
 # Copy the deployed app with standalone node_modules AND generated client
 COPY --from=build /out /app
