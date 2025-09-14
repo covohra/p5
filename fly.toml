@@ -1,0 +1,36 @@
+app = "p5-api"        # 👈 choose a unique name, e.g. p5-api, faseeh-p5, etc.
+primary_region = "iad"
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+
+[env]
+  PORT = "3000"
+  NODE_ENV = "production"
+  RATE_LIMIT_MAX = "100"
+  RATE_LIMIT_TIME_WINDOW = "1 minute"
+
+[[services]]
+  internal_port = 3000
+  processes = ["app"]
+  protocol = "tcp"
+
+  [services.concurrency]
+    type = "connections"
+    soft_limit = 25
+    hard_limit = 50
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.http_checks]]
+    path = "/ready"
+    method = "get"
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "20s"

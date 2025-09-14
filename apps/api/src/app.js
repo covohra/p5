@@ -16,7 +16,7 @@ export function buildApp() {
 
   // Probes (no rate limit)
   app.get('/health', async () => ({ ok: true, time: new Date().toISOString() }))
-  app.get('/ready', async (req, reply) => {
+  app.get('/ready', async (_req, reply) => {
     try {
       await prisma.$queryRaw`SELECT 1`
       return { ready: true }
@@ -33,8 +33,10 @@ export function buildApp() {
       timeWindow: process.env.RATE_LIMIT_TIME_WINDOW ?? '1 minute'
     })
 
+    // List users
     api.get('/users', async () => prisma.user.findMany())
 
+    // Create user
     api.post('/users', {
       schema: {
         body: {
@@ -63,6 +65,31 @@ export function buildApp() {
         const { email, name } = req.body ?? {}
         const user = await prisma.user.create({ data: { email, name } })
         return reply.code(201).send(user)
+      }
+    })
+
+    // Delete user by id (for cleaning up smoke data)
+    api.delete('/users/:id', {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', minLength: 1 } }
+        }
+      },
+      handler: async (req, reply) => {
+        const { id } = req.params
+        try {
+          await prisma.user.delete({ where: { id } })
+          return reply.code(204).send()
+        } catch (err) {
+          // Prisma P2025 = record not found
+          if (err?.code === 'P2025') {
+            return reply.code(404).send({ message: 'User not found' })
+          }
+          req.log.error({ err }, 'delete /users/:id failed')
+          return reply.code(500).send({ message: 'Internal Server Error' })
+        }
       }
     })
   }, { prefix: '/api' })
