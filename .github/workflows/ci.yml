@@ -36,47 +36,48 @@ jobs:
       PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
 
     steps:
-      - name: Checkout
+      - name: 🧾 Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 20
+      - name: 🔧 Node 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # Let the action pick pnpm version from package.json "packageManager"
-      - name: Setup pnpm
+      # Use pnpm version from your package.json "packageManager"
+      - name: 📦 pnpm setup
         uses: pnpm/action-setup@v4
         with:
           run_install: false
 
-      - name: Verify pnpm
+      - name: 🔎 pnpm -v
         run: pnpm -v
 
-      - name: Install deps (lockfile)
+      - name: 📥 Install deps (lockfile)
         run: pnpm install --frozen-lockfile
 
-      # Generate Prisma client into the API package (so tests can import it)
-      - name: Prisma generate (into @p5/api)
-        working-directory: apps/api
+      - name: 🔨 Prisma generate into API package
         env:
-          PRISMA_CLIENT_OUTPUT: ./node_modules/.prisma/client
+          PRISMA_CLIENT_OUTPUT: apps/api/node_modules/.prisma/client
         run: |
-          pnpm --filter @p5/prisma exec prisma generate --schema ../../prisma/schema.prisma
-          test -f ./node_modules/.prisma/client/index.js && echo "✅ Prisma client generated"
+          echo "::group::prisma generate"
+          pnpm --filter @p5/prisma exec prisma generate --schema prisma/schema.prisma
+          ls -la apps/api/node_modules/.prisma/client || true
+          echo "::endgroup::"
 
-      # Apply migrations on the ephemeral Postgres service
-      - name: Prisma migrate (deploy)
-        working-directory: prisma
-        run: pnpm exec prisma migrate deploy --schema ./schema.prisma
+      - name: 🗄️ Migrate ephemeral Postgres
+        run: |
+          echo "::group::prisma migrate deploy"
+          pnpm --filter @p5/prisma exec prisma migrate deploy --schema prisma/schema.prisma
+          echo "::endgroup::"
 
-      - name: Run tests
+      - name: 🧪 Run tests
         run: pnpm --filter @p5/api test
 
-      - name: Setup Flyctl
+      - name: 🛫 Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
-      - name: Deploy to Fly
+      - name: 🚀 Deploy to Fly
         if: ${{ success() }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
