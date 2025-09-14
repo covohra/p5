@@ -36,44 +36,40 @@ jobs:
       PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
 
     steps:
-      - name: Checkout
+      - name: 🧾 Checkout
         uses: actions/checkout@v4
 
-      - name: Node 20
+      - name: 🔧 Setup Node 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: pnpm setup (use version from package.json)
+      - name: 📦 Setup pnpm (use version from package.json)
         uses: pnpm/action-setup@v4
         with:
           run_install: false
 
-      - name: Install deps (no postinstall scripts)
+      - name: 📥 Install deps (no postinstall scripts)
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      # Generate Prisma client directly into the API package from repo root
-      - name: Prisma generate (output into apps/api)
+      # Generate Prisma client directly into apps/api/.prisma using ABSOLUTE path
+      - name: 🔨 Prisma generate into API
         env:
-          PRISMA_CLIENT_OUTPUT: ./apps/api/node_modules/.prisma/client
-        run: |
-          pnpm --filter @p5/prisma exec prisma generate --schema prisma/schema.prisma
-          ls -la ./apps/api/node_modules/.prisma/client
+          PRISMA_CLIENT_OUTPUT: ${{ github.workspace }}/apps/api/node_modules/.prisma/client
+        run: pnpm --filter @p5/prisma run generate
 
-      # Apply migrations to the ephemeral Postgres
-      - name: Prisma migrate (deploy)
+      - name: 🗄️ Apply migrations to ephemeral Postgres
         env:
           PRISMA_MIGRATE_SKIP_GENERATE: "1"
-        run: |
-          pnpm --filter @p5/prisma exec prisma migrate deploy --schema prisma/schema.prisma
+        run: pnpm --filter @p5/prisma run migrate:deploy
 
-      - name: Run tests
+      - name: 🧪 Run tests
         run: pnpm --filter @p5/api test
 
-      - name: Setup Flyctl
+      - name: 🛫 Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
-      - name: Deploy to Fly
+      - name: 🚀 Deploy to Fly
         if: ${{ success() }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
