@@ -4,6 +4,7 @@ on:
   push:
     branches: [ main ]
 
+# cancel older runs of the same ref
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
@@ -13,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    # Ephemeral Postgres for tests
     services:
       postgres:
         image: postgres:16
@@ -36,52 +38,52 @@ jobs:
       PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
 
     steps:
-      - name: 🧾 Checkout
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 🔧 Node 20
+      - name: Setup Node 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      	# Use the pnpm version from package.json "packageManager"
-      - name: 📦 pnpm setup
+      # Use the pnpm version from package.json "packageManager"
+      - name: pnpm setup
         uses: pnpm/action-setup@v4
         with:
           run_install: false
 
-      - name: 🔎 pnpm -v
+      - name: Show pnpm version
         run: pnpm -v
 
-	# Install deps WITHOUT running postinstall scripts
-      - name: 📥 Install deps (no scripts)
+      # Install deps WITHOUT running postinstall scripts
+      - name: Install deps (no scripts)
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-    	# Generate Prisma client INTO the API package (so @prisma/client can import)
-      - name: 🔨 Prisma generate into API package
+      # Generate Prisma client INTO the API package (so @prisma/client can import)
+      - name: Prisma generate into API package
         run: |
           set -euxo pipefail
           cd apps/api
           export PRISMA_CLIENT_OUTPUT=./node_modules/.prisma/client
           timeout 3m pnpm --filter @p5/prisma exec prisma generate --schema ../../prisma/schema.prisma
-          echo "== contents of .prisma/client =="
           ls -la ./node_modules/.prisma/client
 
-     	 # Apply migrations on the ephemeral Postgres
-      - name: 🗄️ Migrate ephemeral Postgres
+      # Apply migrations on the ephemeral Postgres
+      - name: Migrate ephemeral Postgres
         env:
           PRISMA_MIGRATE_SKIP_GENERATE: "1"
         run: |
           set -euxo pipefail
           timeout 3m pnpm --filter @p5/prisma exec prisma migrate deploy --schema prisma/schema.prisma
 
-      - name: 🧪 Run tests
+      - name: Run tests
         run: pnpm --filter @p5/api test
 
-      - name: 🛫 Setup Flyctl
+      # Deploy only if tests pass
+      - name: Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
-      - name: 🚀 Deploy to Fly
+      - name: Deploy to Fly
         if: ${{ success() }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
