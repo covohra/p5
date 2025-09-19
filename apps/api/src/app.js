@@ -2,22 +2,25 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
 import pkg from '@prisma/client'
-import { getVersionInfo } from './version.js'   // ← add this file if you haven't
+import prodCore from './plugins/prod-core.js'   // <-- our single plugin (auth/errors/metrics)
+import { getVersionInfo } from './version.js'   // you already have this
+
 const { PrismaClient } = pkg
 
-export function buildApp() {
+export async function buildApp() {
   const app = Fastify({ logger: true })
 
-  // CORS: allowlist via env (comma-separated), or '*' for all.
-  // Also allow no-origin (curl, health checks).
+  // CORS — allowlist via env CORS_ORIGINS (comma-separated) or '*'
   const corsOrigins = (process.env.CORS_ORIGINS || '*')
     .split(',')
     .map(s => s.trim())
-  app.register(cors, {
+  const allowAll = corsOrigins.includes('*')
+
+  await app.register(cors, {
     origin(origin, cb) {
-      if (!origin) return cb(null, true) // allow CLI tools
-      const ok = corsOrigins.includes('*') || corsOrigins.includes(origin)
-      cb(null, ok)
+      // allow server-to-server / curl (no origin) and any in allowlist
+      if (allowAll || !origin || corsOrigins.includes(origin)) return cb(null, true)
+      cb(null, false)
     }
   })
 
@@ -25,26 +28,26 @@ export function buildApp() {
   const prisma = new PrismaClient()
   app.decorate('prisma', prisma)
 
-  // Version (for deploy tracing)
+  // Version + probes (no auth)
   app.get('/version', async () => getVersionInfo())
-
-  // Probes (no rate limit)
   app.get('/health', async () => ({ ok: true, time: new Date().toISOString() }))
   app.get('/ready', async (_req, reply) => {
-    try {
-      await prisma.$queryRaw`SELECT 1`
-      return { ready: true }
-    } catch {
-      return reply.code(503).send({ ready: false })
-    }
+    try { await prisma.$queryRaw`SELECT 1`; return { ready: true } }
+    catch { return reply.code(503).send({ ready: false }) }
   })
 
-  // API with scoped rate limit
-  app.register(async (api) => {
+  // Prod-ready glue (JWT, optional auth gate, error contract, /metrics)
+  await app.register(prodCore)
+
+  // Protected API
+  await app.register(async (api) => {
     await api.register(rateLimit, {
       max: Number(process.env.RATE_LIMIT_MAX ?? 100),
       timeWindow: process.env.RATE_LIMIT_TIME_WINDOW ?? '1 minute'
     })
+
+    // If AUTH_REQUIRED=true (via env/secret), prodCore’s preHandler will enforce JWT.
+    // Otherwise, it is open during dev/CI.
 
     // List users
     api.get('/users', async () => prisma.user.findMany())
@@ -60,18 +63,6 @@ export function buildApp() {
             email: { type: 'string', format: 'email', maxLength: 254 },
             name: { type: 'string', minLength: 1, maxLength: 120, nullable: true }
           }
-        },
-        response: {
-          201: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              email: { type: 'string' },
-              name: { type: ['string', 'null'] },
-              createdAt: { type: 'string' },
-              updatedAt: { type: 'string' }
-            }
-          }
         }
       },
       handler: async (req, reply) => {
@@ -81,7 +72,7 @@ export function buildApp() {
       }
     })
 
-    // Delete user by id (for cleaning up smoke data)
+    // Delete user by id
     api.delete('/users/:id', {
       schema: {
         params: {
@@ -97,18 +88,15 @@ export function buildApp() {
           return reply.code(204).send()
         } catch (err) {
           if (err?.code === 'P2025') {
-            return reply.code(404).send({ message: 'User not found' })
+            return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'User not found' } })
           }
           req.log.error({ err }, 'delete /users/:id failed')
-          return reply.code(500).send({ message: 'Internal Server Error' })
+          return reply.code(500).send({ error: { code: 'INTERNAL', message: 'Internal Server Error' } })
         }
       }
     })
   }, { prefix: '/api' })
 
-  app.addHook('onClose', async () => {
-    await prisma.$disconnect()
-  })
-
+  app.addHook('onClose', async () => { await prisma.$disconnect() })
   return app
 }
