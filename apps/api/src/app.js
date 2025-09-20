@@ -1,7 +1,7 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
-import pkg from '@prisma/client'
+import pkg from '@prisma/client'\nimport prodCore from './plugins/prod-core.js'
 import prodCore from './plugins/prod-core.js'   // <-- our single plugin (auth/errors/metrics)
 import { getVersionInfo } from './version.js'   // you already have this
 

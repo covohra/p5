@@ -1,104 +1,118 @@
 /* apps/api/src/plugins/prod-core.js */
-export default async function prodCore(app) {
-  // ---- Config validation (fail fast) ----
-  const required = ["DATABASE_URL", "RATE_LIMIT_MAX", "RATE_LIMIT_TIME_WINDOW"];
-  const missing = required.filter((k) => !process.env[k]);
-  if (missing.length) {
-    app.log.error({ missing }, "Missing required env vars");
-    throw new Error("Missing env: " + missing.join(","));
+import fp from "fastify-plugin"
+import jwtPlugin from "@fastify/jwt"
+import client from "prom-client"
+
+export default fp(async (app) => {
+  // ---------- 1) Config validation ----------
+  const required = ["RATE_LIMIT_MAX","RATE_LIMIT_TIME_WINDOW"]
+  if (process.env.AUTH_REQUIRED === "true") required.push("JWT_SECRET")
+  for (const k of required) {
+    if (!process.env[k] || String(process.env[k]).trim() === "") {
+      app.log.error({ key: k }, "Missing required env")
+      throw new Error(Missing required env: ${k})
+    }
   }
 
-  // Optional auth gate (default off so CI stays green)
-  const AUTH_REQUIRED = String(process.env.AUTH_REQUIRED || "false").toLowerCase() === "true";
-  const JWT_SECRET = process.env.JWT_SECRET || "dev-insecure-secret-change-me";
-
-  // ---- JWT ----
-  const jwtMod = await import("@fastify/jwt");
-  await app.register(jwtMod.default, { secret: JWT_SECRET });
-
-  app.decorate("authVerify", async (req, reply) => {
-    if (!AUTH_REQUIRED) return; // auth disabled
-    // Public endpoints even when auth is on
-    const url = req.raw.url || "";
-    if (
-      url === "/health" || url === "/ready" || url === "/version" ||
-      url.startsWith("/auth/")
-    ) return;
-
-    try {
-      await req.jwtVerify();
-    } catch {
-      return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Invalid or missing token" }});
-    }
-  });
-
-  app.addHook("preHandler", app.authVerify);
-
-  // ---- Error handler (uniform shape) ----
-  app.setErrorHandler((err, req, reply) => {
-    // Validation errors from Fastify have .validation / or Ajv text
-    if (err.validation || err.validationContext) {
-      return reply.code(400).send({
-        error: { code: "VALIDATION_ERROR", message: err.message, details: err.validation || null }
-      });
-    }
-    const status = (err.statusCode && err.statusCode >= 400 && err.statusCode < 600) ? err.statusCode : 500;
-    if (status >= 500) req.log.error({ err }, "Unhandled error");
-    return reply.code(status).send({
-      error: { code: status === 401 ? "UNAUTHORIZED" : "INTERNAL_ERROR", message: status === 500 ? "Internal Server Error" : err.message }
-    });
-  });
-
-  // ---- Metrics (/metrics) ----
-  const prom = (await import("prom-client")).default || await import("prom-client");
-  const register = prom.register;
-  const counter = new prom.Counter({
+  // ---------- 2) Metrics ----------
+  const r = client.register
+  const httpReqs = new client.Counter({
     name: "http_requests_total",
     help: "Total HTTP requests",
-    labelNames: ["method", "route", "status"]
-  });
-  const hist = new prom.Histogram({
+    labelNames: ["route","method","status"]
+  })
+  const httpDur = new client.Histogram({
     name: "http_request_duration_ms",
-    help: "HTTP request duration (ms)",
-    labelNames: ["method", "route", "status"],
-    buckets: [50, 100, 200, 500, 1000, 2000, 5000]
-  });
-
-  app.addHook("onRequest", async (req) => { req._start = Date.now(); });
-  app.addHook("onResponse", async (req, reply) => {
+    help: "HTTP request duration in ms",
+    buckets: [5, 10, 25, 50, 100, 250, 500, 1000, 2000],
+    labelNames: ["route","method","status"]
+  })
+  app.addHook("onResponse", async (req, res) => {
     const labels = {
+      route: req.routerPath || req.url || "unmatched",
       method: req.method,
-      route: req.routerPath || req.url || "",
-      status: String(reply.statusCode)
-    };
-    counter.inc(labels, 1);
-    if (req._start) hist.observe(labels, Date.now() - req._start);
-  });
-
+      status: String(res.statusCode)
+    }
+    httpReqs.inc(labels)
+    const started = req.headers["x-start-time"]
+    if (started) {
+      const ms = Date.now() - Number(started)
+      httpDur.observe(labels, ms)
+    }
+  })
+  app.addHook("onRequest", async (req) => {
+    req.headers["x-start-time"] = Date.now().toString()
+  })
   app.get("/metrics", async (_req, reply) => {
-    reply.header("Content-Type", register.contentType);
-    return register.metrics();
-  });
+    reply.header("Content-Type", r.contentType)
+    return r.metrics()
+  })
 
-  // ---- /auth/login (demo) ----
-  app.register(async (r) => {
-    r.post("/login", {
-      schema: {
-        body: {
-          type: "object",
-          required: ["email"],
-          additionalProperties: false,
-          properties: {
-            email: { type: "string", format: "email", maxLength: 254 }
+  // ---------- 3) JWT auth (guard /api/* when AUTH_REQUIRED=true) ----------
+  const authRequired = process.env.AUTH_REQUIRED === "true"
+  if (authRequired) {
+    await app.register(jwtPlugin, { secret: process.env.JWT_SECRET })
+  }
+
+  // public login route (minimal)
+  app.post("/auth/login", {
+    schema: {
+      body: {
+        type: "object",
+        required: ["email"],
+        properties: { email: { type: "string", format: "email" } }
+      },
+      response: { 200: { type: "object", properties: { token: { type: "string" } } } }
+    }
+  }, async (req) => {
+    const { email } = req.body
+    // In real life, look up/create a user; here we mint a simple token
+    const token = await app.jwt.sign({ sub: email }, { expiresIn: "2h" })
+    return { token }
+  })
+
+  // Protect /api/* if required
+  if (authRequired) {
+    app.addHook("onRoute", (route) => {
+      if (route.path?.startsWith("/api/")) {
+        const ensure = async (req, reply) => {
+          try {
+            await req.jwtVerify()
+          } catch {
+            return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Missing or invalid token" } })
           }
         }
-      },
-      handler: async (req) => {
-        const { email } = req.body ?? {};
-        // Minimal: identity == email; in real app, verify OTP/password etc.
-        const token = app.jwt.sign({ sub: email });
-        return { token };
+        // Prepend guard
+        route.preHandler = Array.isArray(route.preHandler)
+          ? [ensure, ...route.preHandler]
+          : route.preHandler
+            ? [ensure, route.preHandler]
+            : [ensure]
       }
-    });
-  }, { prefix: "/auth" });
-}
+    })
+  }
+
+  // ---------- 4) Error contract ----------
+  app.setErrorHandler((err, _req, reply) => {
+    const isValidation = err.validation || err.code === "FST_ERR_VALIDATION"
+    const status = isValidation ? 400 : (err.statusCode && err.statusCode >= 400 ? err.statusCode : 500)
+    if (status >= 500) app.log.error({ err }, "Unhandled error")
+    const payload = {
+      error: {
+        code: isValidation ? "VALIDATION_ERROR" : (err.code || "INTERNAL"),
+        message: err.message || "Internal Server Error",
+        details: err.validation || undefined
+      }
+    }
+    reply.code(status).send(payload)
+  })
+
+  // ---------- 5) Graceful shutdown ----------
+  const close = async () => {
+    try { await app.close() } catch {}
+    // prisma disconnect is handled by your onClose hook in app.js
+    process.exit(0)
+  }
+  process.on("SIGTERM", close)
+  process.on("SIGINT", close)
+})
