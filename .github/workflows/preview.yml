@@ -1,41 +1,115 @@
-name: preview (per PR)
+name: preview - test (PR) + deploy (push)
 
 on:
   pull_request:
+    branches: ["**"]
     types: [opened, synchronize, reopened, closed]
+  push:
+    branches-ignore: [ main ] # any non-main branch
+
+concurrency:
+  group: preview-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  deploy-preview:
+  preview:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+
+    # Ephemeral Postgres for tests
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: p5
+          POSTGRES_PASSWORD: p5pass
+          POSTGRES_DB: p5db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U p5 -d p5db"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
     env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      NODE_ENV: test
+      DATABASE_URL: postgresql://p5:p5pass@localhost:5432/p5db?schema=public&sslmode=disable
+      RATE_LIMIT_MAX: "100"
+      RATE_LIMIT_TIME_WINDOW: "1 minute"
+      PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
+      # generate Prisma client directly into the API package
+      PRISMA_CLIENT_OUTPUT: ${{ github.workspace }}/apps/api/node_modules/.prisma/client
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: pnpm (from package.json)
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install deps (no postinstall)
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Prisma generate (into API)
+        run: |
+          pnpm --filter @p5/prisma exec prisma generate --schema prisma/schema.prisma
+          ls -la "${PRISMA_CLIENT_OUTPUT}"
+
+      - name: Prisma migrate (deploy)
+        env:
+          PRISMA_MIGRATE_SKIP_GENERATE: "1"
+        run: |
+          pnpm --filter @p5/prisma exec prisma migrate deploy --schema prisma/schema.prisma
+
+      - name: Run API tests
+        run: pnpm --filter @p5/api test
+
+      # Deploy preview app ONLY on push (not PR) and never for Dependabot
       - name: Setup Flyctl
+        if: ${{ github.event_name == 'push' && github.actor != 'dependabot[bot]' }}
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
-      - name: Deploy PR preview
+      - name: Deploy preview app
+        if: ${{ github.event_name == 'push' && github.actor != 'dependabot[bot]' }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          APP="p5-api-pr-${{ github.event.number }}"
-          echo "Deploying preview app $APP..."
-          flyctl deploy --remote-only --app "$APP" --image-label "pr-${{ github.event.number }}-${{ github.sha }}"
+          set -euo pipefail
+          # Sanitize branch name for Fly app name (replace slashes with dashes)
+          APP="p5-api-pr-${GITHUB_REF_NAME//\//-}"
+          echo "Preview app: $APP"
+          # Create app if missing
+          if ! flyctl apps show "$APP" >/dev/null 2>&1; then
+            flyctl apps create "$APP"
+            # Attach your staging Postgres once (safe if already attached)
+            flyctl postgres attach --app "$APP" p5-postgres-staging || true
+          fi
+          # Deploy preview image
+          flyctl deploy --remote-only --app "$APP" --image-label "preview-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA}"
           echo "Preview available at https://$APP.fly.dev"
 
+  # Cleanup when PR is closed
   cleanup-preview:
-    if: github.event.action == 'closed'
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
       - name: Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
       - name: Destroy preview app
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          APP="p5-api-pr-${{ github.event.number }}"
-          echo "Destroying preview app $APP..."
-          flyctl apps destroy "$APP" --yes
+          set -euo pipefail
+          APP="p5-api-pr-${GITHUB_HEAD_REF//\//-}"
+          echo "Destroying preview app $APP (if it exists)..."
+          flyctl apps show "$APP" >/dev/null 2>&1 && flyctl apps destroy "$APP" --yes || echo "No app to remove."

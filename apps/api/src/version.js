@@ -1,13 +1,14 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 export function getVersionInfo() {
+  let pkg = {};
+  try { pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")); } catch {}
   return {
-    sha: process.env.GIT_SHA || null,
+    name: pkg.name ?? "p5-api",
+    version: pkg.version ?? "0.0.0",
+    gitSha: process.env.GIT_SHA || process.env.FLY_IMAGE_REF || null,
     node: process.version,
-    pid: process.pid,
-    env: process.env.NODE_ENV || 'unknown',
-    fly: {
-      allocId: process.env.FLY_ALLOC_ID || null,
-      machineId: process.env.FLY_MACHINE_ID || null
-    },
     time: new Date().toISOString()
-  }
+  };
 }

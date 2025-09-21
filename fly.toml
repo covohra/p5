@@ -1,13 +1,13 @@
-# fly.toml — p5 API
-app = "p5-api"              # <- keep if unique; change if Fly says it's taken
+# fly.toml — p5 API (production)
+app = "p5-api"
 primary_region = "iad"
 
 [build]
   dockerfile = "apps/api/Dockerfile"
 
 [env]
-  PORT = "3000"
   NODE_ENV = "production"
+  PORT = "3000"
   RATE_LIMIT_MAX = "100"
   RATE_LIMIT_TIME_WINDOW = "1 minute"
 

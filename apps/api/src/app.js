@@ -1,102 +1,130 @@
-import Fastify from 'fastify'
-import cors from '@fastify/cors'
-import rateLimit from '@fastify/rate-limit'
-import pkg from '@prisma/client'\nimport prodCore from './plugins/prod-core.js'
-import prodCore from './plugins/prod-core.js'   // <-- our single plugin (auth/errors/metrics)
-import { getVersionInfo } from './version.js'   // you already have this
+import Fastify from "fastify";
+import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
+import pkg from "@prisma/client";
+import "dotenv/config";
 
-const { PrismaClient } = pkg
+import { getVersionInfo } from "./version.js";
+import { registerConfig } from "./plugins/config.js";
+import { registerErrorHandling } from "./plugins/error.js";
+import { registerAuth } from "./plugins/auth.js";
+import { registerMetrics } from "./metrics.js";
 
-export async function buildApp() {
-  const app = Fastify({ logger: true })
+const { PrismaClient } = pkg;
 
-  // CORS — allowlist via env CORS_ORIGINS (comma-separated) or '*'
-  const corsOrigins = (process.env.CORS_ORIGINS || '*')
-    .split(',')
-    .map(s => s.trim())
-  const allowAll = corsOrigins.includes('*')
+export function buildApp() {
+  const app = Fastify({ logger: true });
 
-  await app.register(cors, {
+  // 1) Config (env validation)
+  registerConfig(app);
+
+  // 2) CORS allowlist
+  const allow = app.config.corsOrigins;
+  app.register(cors, {
     origin(origin, cb) {
-      // allow server-to-server / curl (no origin) and any in allowlist
-      if (allowAll || !origin || corsOrigins.includes(origin)) return cb(null, true)
-      cb(null, false)
+      if (!origin) return cb(null, true); // curl/health
+      const ok = allow.includes("*") || allow.includes(origin);
+      cb(null, ok);
+    },
+  });
+
+  // 3) Prisma
+  const prisma = new PrismaClient();
+  app.decorate("prisma", prisma);
+
+  // 4) Metrics
+  registerMetrics(app);
+
+  // 5) Probes & version (no auth)
+  app.get("/health", async () => ({ ok: true, time: new Date().toISOString() }));
+  app.get("/ready", async (_req, reply) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return { ready: true };
+    } catch {
+      return reply.code(503).send({ ready: false });
     }
-  })
+  });
+  app.get("/version", async () => getVersionInfo());
 
-  // Prisma
-  const prisma = new PrismaClient()
-  app.decorate('prisma', prisma)
+  // 6) Auth (adds POST /auth/login and app.authGuard)
+  registerAuth(app);
 
-  // Version + probes (no auth)
-  app.get('/version', async () => getVersionInfo())
-  app.get('/health', async () => ({ ok: true, time: new Date().toISOString() }))
-  app.get('/ready', async (_req, reply) => {
-    try { await prisma.$queryRaw`SELECT 1`; return { ready: true } }
-    catch { return reply.code(503).send({ ready: false }) }
-  })
-
-  // Prod-ready glue (JWT, optional auth gate, error contract, /metrics)
-  await app.register(prodCore)
-
-  // Protected API
-  await app.register(async (api) => {
+  // 7) Protected API with rate limit
+  app.register(async (api) => {
     await api.register(rateLimit, {
-      max: Number(process.env.RATE_LIMIT_MAX ?? 100),
-      timeWindow: process.env.RATE_LIMIT_TIME_WINDOW ?? '1 minute'
-    })
+      max: Number(app.config.rateLimitMax),
+      timeWindow: app.config.rateLimitWindow,
+    });
 
-    // If AUTH_REQUIRED=true (via env/secret), prodCore’s preHandler will enforce JWT.
-    // Otherwise, it is open during dev/CI.
+    // All routes in this scope require JWT
+    api.addHook("preHandler", app.authGuard);
 
     // List users
-    api.get('/users', async () => prisma.user.findMany())
+    api.get("/users", async () => prisma.user.findMany());
 
     // Create user
-    api.post('/users', {
+    api.post("/users", {
       schema: {
         body: {
-          type: 'object',
-          required: ['email'],
+          type: "object",
+          required: ["email"],
           additionalProperties: false,
           properties: {
-            email: { type: 'string', format: 'email', maxLength: 254 },
-            name: { type: 'string', minLength: 1, maxLength: 120, nullable: true }
-          }
-        }
+            email: { type: "string", format: "email", maxLength: 254 },
+            name: { type: "string", minLength: 1, maxLength: 120, nullable: true },
+          },
+        },
+        response: {
+          201: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              email: { type: "string" },
+              name: { type: ["string", "null"] },
+              createdAt: { type: "string" },
+              updatedAt: { type: "string" },
+            },
+          },
+        },
       },
       handler: async (req, reply) => {
-        const { email, name } = req.body ?? {}
-        const user = await prisma.user.create({ data: { email, name } })
-        return reply.code(201).send(user)
-      }
-    })
+        const { email, name } = req.body ?? {};
+        const user = await prisma.user.create({ data: { email, name } });
+        return reply.code(201).send(user);
+      },
+    });
 
     // Delete user by id
-    api.delete('/users/:id', {
+    api.delete("/users/:id", {
       schema: {
         params: {
-          type: 'object',
-          required: ['id'],
-          properties: { id: { type: 'string', minLength: 1 } }
-        }
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", minLength: 1 } },
+        },
       },
       handler: async (req, reply) => {
-        const { id } = req.params
+        const { id } = req.params;
         try {
-          await prisma.user.delete({ where: { id } })
-          return reply.code(204).send()
+          await prisma.user.delete({ where: { id } });
+          return reply.code(204).send();
         } catch (err) {
-          if (err?.code === 'P2025') {
-            return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'User not found' } })
+          if (err?.code === "P2025") {
+            return reply.code(404).send({ error: { code: "NOT_FOUND", message: "User not found" } });
           }
-          req.log.error({ err }, 'delete /users/:id failed')
-          return reply.code(500).send({ error: { code: 'INTERNAL', message: 'Internal Server Error' } })
+          req.log.error({ err }, "delete /users/:id failed");
+          return reply.code(500).send({ error: { code: "INTERNAL", message: "Internal Server Error" } });
         }
-      }
-    })
-  }, { prefix: '/api' })
+      },
+    });
+  }, { prefix: "/api" });
 
-  app.addHook('onClose', async () => { await prisma.$disconnect() })
-  return app
+  // 8) Global error shape
+  registerErrorHandling(app);
+
+  // 9) Graceful shutdown
+  app.addHook("onClose", async () => { await prisma.$disconnect(); });
+
+  return app;
 }

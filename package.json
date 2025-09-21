@@ -33,5 +33,9 @@
       "esbuild",
       "prisma"
     ]
+  },
+  "dependencies": {
+    "@fastify/jwt": "^10.0.0",
+    "prom-client": "^15.1.3"
   }
 }
