@@ -1,28 +1,17 @@
-export function registerErrorHandling(app) {
-  app.setNotFoundHandler((req, reply) => {
-    reply.code(404).send({
-      error: { code: "NOT_FOUND", message: Route ${req.method} ${req.url} not found },
-    });
-  });
+export function registerErrorHandler(app) {
+  app.setErrorHandler((err, _req, reply) => {
+    const status = err.statusCode || err.status || 500
+    const code = err.code || 'INTERNAL_ERROR'
+    const message =
+      status < 500
+        ? (err.message || 'Bad Request')
+        : 'Internal Server Error'
 
-  app.setErrorHandler((err, req, reply) => {
-    const isValidation = Array.isArray(err?.validation) || err?.code === "FST_ERR_VALIDATION";
-    if (isValidation) {
-      return reply.code(400).send({
-        error: {
-          code: "VALIDATION",
-          message: err.message || "Validation failed",
-          details: err.validation,
-        },
-      });
-    }
-    if (err?.code === "P2025") {
-      return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Record not found" } });
-    }
-    const status = err.statusCode && err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 500;
-    if (status >= 500) req.log.error({ err }, "unhandled error");
+    // Log at error level if 5xx, warn otherwise
+    app.log[status >= 500 ? 'error' : 'warn']({ err }, 'request failed')
+
     reply.code(status).send({
-      error: { code: status >= 500 ? "INTERNAL" : "BAD_REQUEST", message: err.message || "Unexpected error" },
-    });
-  });
+      error: { code, message }
+    })
+  })
 }
