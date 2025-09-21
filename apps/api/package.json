@@ -13,7 +13,7 @@
     "@fastify/cors": "^10.0.0",
     "@fastify/jwt": "^10.0.0",
     "@fastify/rate-limit": "^10.3.0",
-    "@prisma/client": "5.22.0",
+    "@prisma/client": "6.16.2",
     "dotenv": "^16.4.5",
     "fastify": "^5.1.0",
     "pino-pretty": "^11.2.2",
