@@ -1,22 +1,27 @@
-import client from "prom-client";
-
+// Tiny Prometheus metrics without extra deps
 export function registerMetrics(app) {
-  const register = client.register;
-  client.collectDefaultMetrics({ prefix: "p5_", labels: { app: "api" } });
+  let total = 0;
+  let errors = 0;
 
-  const httpRequests = new client.Counter({
-    name: "p5_http_requests_total",
-    help: "Total HTTP requests",
-    labelNames: ["method", "route", "status"],
+  app.addHook('onResponse', (_req, reply, done) => {
+    total++;
+    if (reply.statusCode >= 500) errors++;
+    done();
   });
 
-  app.addHook("onResponse", async (req, reply) => {
-    const route = req.routeOptions?.url || req.url;
-    httpRequests.labels(req.method, route, String(reply.statusCode)).inc();
-  });
-
-  app.get("/metrics", async (_req, reply) => {
-    reply.header("Content-Type", register.contentType);
-    return register.metrics();
+  app.get('/metrics', async (_req, reply) => {
+    const body = [
+      '# HELP p5_up Always 1',
+      '# TYPE p5_up gauge',
+      'p5_up 1',
+      '# HELP p5_http_requests_total Total HTTP responses',
+      '# TYPE p5_http_requests_total counter',
+      `p5_http_requests_total ${total}`,
+      '# HELP p5_http_errors_total 5xx HTTP responses',
+      '# TYPE p5_http_errors_total counter',
+      `p5_http_errors_total ${errors}`,
+      '',
+    ].join('\n');
+    reply.header('Content-Type', 'text/plain; version=0.0.4').send(body);
   });
 }

@@ -1,61 +1,67 @@
-import Fastify from 'fastify'
-import cors from '@fastify/cors'
-import rateLimit from '@fastify/rate-limit'
-import pkg from '@prisma/client'
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
+import pkg from '@prisma/client';
 
-import { readConfig } from './config.js'
-import { registerErrorHandler } from './errors.js'
-import { registerMetrics } from './metrics.js'
-import authPlugin from './auth.js'
+import { readConfig } from './config.js';
+import { registerErrorHandler } from './errors.js';
+import { registerMetrics } from './metrics.js';
+import authPlugin from './auth.js';
+import { getVersionInfo } from './version.js'; // you already have this
 
-const { PrismaClient } = pkg
+const { PrismaClient } = pkg;
 
 export async function buildApp() {
-  const cfg = readConfig()
-  const app = Fastify({ logger: true })
+  const cfg = readConfig();
 
-  // CORS allowlist
-  const allowAll = cfg.corsOrigins.includes('*')
+  const app = Fastify({
+    logger: true,
+    ajv: { customOptions: { removeAdditional: true, coerceTypes: true } },
+  });
+
+  // ---------- CORS (allowlist via env) ----------
+  const allowAll = cfg.corsOrigins.includes('*');
   await app.register(cors, {
-    origin(origin, cb) {
-      if (allowAll || !origin || cfg.corsOrigins.includes(origin)) return cb(null, true)
-      cb(new Error('CORS'), false)
-    }
-  })
+    origin: (origin, cb) => {
+      if (allowAll || !origin || cfg.corsOrigins.includes(origin)) return cb(null, true);
+      cb(new Error('CORS'), false);
+    },
+  });
 
-  // Prisma
-  const prisma = new PrismaClient()
-  app.decorate('prisma', prisma)
+  // ---------- Prisma ----------
+  const prisma = new PrismaClient();
+  app.decorate('prisma', prisma);
 
-  // Auth (JWT) + /auth/login public route
-  await app.register(authPlugin, { jwtSecret: cfg.jwtSecret })
+  // ---------- Auth (public /auth/login + guard decorator) ----------
+  await app.register(authPlugin, { jwtSecret: cfg.jwtSecret });
 
-  // Version / health / ready (public)
-  app.get('/version', async () => ({
-    sha: process.env.GIT_SHA || 'dev',
-    time: new Date().toISOString()
-  }))
-  app.get('/health', async () => ({ ok: true, time: new Date().toISOString() }))
+  // ---------- Metrics ----------
+  registerMetrics(app);
+
+  // ---------- Public endpoints ----------
+  app.get('/version', async () => getVersionInfo());
+  app.get('/health', async () => ({ ok: true, time: new Date().toISOString() }));
   app.get('/ready', async (_req, reply) => {
-    try { await prisma.$queryRaw`SELECT 1`; return { ready: true } }
-    catch { return reply.code(503).send({ ready: false }) }
-  })
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return { ready: true };
+    } catch {
+      return reply.code(503).send({ ready: false });
+    }
+  });
 
-  // Metrics (Prometheus-style text; lightweight)
-  registerMetrics(app)
-
-  // API (protected)
+  // ---------- Protected API (/api/*) ----------
   app.register(async (api) => {
     await api.register(rateLimit, {
       max: cfg.rateLimitMax,
-      timeWindow: cfg.rateLimitWindow
-    })
+      timeWindow: cfg.rateLimitWindow,
+    });
 
-    // require JWT for all /api routes
-    api.addHook('preHandler', app.auth)
+    // Guard all API routes (requires Authorization: Bearer <token>)
+    api.addHook('preHandler', app.auth);
 
     // List users
-    api.get('/users', async () => prisma.user.findMany())
+    api.get('/users', async () => prisma.user.findMany());
 
     // Create user
     api.post('/users', {
@@ -66,8 +72,8 @@ export async function buildApp() {
           additionalProperties: false,
           properties: {
             email: { type: 'string', format: 'email', maxLength: 254 },
-            name: { type: 'string', minLength: 1, maxLength: 120, nullable: true }
-          }
+            name: { type: 'string', minLength: 1, maxLength: 120, nullable: true },
+          },
         },
         response: {
           201: {
@@ -77,26 +83,22 @@ export async function buildApp() {
               email: { type: 'string' },
               name: { type: ['string', 'null'] },
               createdAt: { type: 'string' },
-              updatedAt: { type: 'string' }
-            }
-          }
-        }
+              updatedAt: { type: 'string' },
+            },
+          },
+        },
       },
       handler: async (req, reply) => {
-        const { email, name } = req.body ?? {}
-        const user = await prisma.user.create({ data: { email, name } })
-        return reply.code(201).send(user)
-      }
-    })
-  }, { prefix: '/api' })
+        const { email, name } = req.body ?? {};
+        const user = await prisma.user.create({ data: { email, name } });
+        return reply.code(201).send(user);
+      },
+    });
+  }, { prefix: '/api' });
 
-  // errors
-  registerErrorHandler(app)
+  // ---------- Errors + graceful close ----------
+  registerErrorHandler(app);
+  app.addHook('onClose', async () => { await prisma.$disconnect(); });
 
-  // graceful shutdown
-  app.addHook('onClose', async () => {
-    await prisma.$disconnect()
-  })
-
-  return app
+  return app;
 }
