@@ -6,11 +6,13 @@ WORKDIR /repo
 RUN apt-get update -y && apt-get install -y openssl libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 
-# Install workspace (gets Prisma CLI via devDeps)
+# Workspace manifests first (better caching)
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY prisma/package.json prisma/package.json
-RUN pnpm install --recursive --frozen-lockfile
+
+# Install all workspaces (no postinstall)
+RUN pnpm install --recursive --frozen-lockfile --ignore-scripts
 
 # Copy sources
 COPY apps apps
@@ -28,9 +30,10 @@ RUN pnpm exec prisma generate --schema ./schema.prisma
 # ---------- runtime ----------
 FROM node:20-slim AS runtime
 WORKDIR /app
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    PORT=3000
 
-# needed for healthcheck + prisma runtime
+# minimal deps (wget for healthcheck; OpenSSL for Prisma engine)
 RUN apt-get update -y \
   && apt-get install -y wget ca-certificates libssl3 \
   && rm -rf /var/lib/apt/lists/*
@@ -38,8 +41,17 @@ RUN apt-get update -y \
 # Copy the deployed app with standalone node_modules AND generated client
 COPY --from=build /out /app
 
-ENV PORT=3000
-EXPOSE 3000
-CMD ["node", "-r", "dotenv/config", "./src/index.js"]
-# Vector config (optional; harmless if unused)
+# Optional: vector config for future log shipping (harmless if unused)
 COPY ops/vector.toml /etc/vector/vector.toml
+
+# Healthcheck (Fastify /ready)
+HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD wget -qO- http://127.0.0.1:3000/ready || exit 1
+
+# Non-root for safety
+USER node
+
+EXPOSE 3000
+
+# >>> Entry: run the API from the deployed bundle <<<
+# If your entry file is apps/api/src/server.js instead, change the path accordingly.
+CMD ["node", "apps/api/src/server.js"]
