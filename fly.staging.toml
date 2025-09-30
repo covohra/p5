@@ -1,6 +1,6 @@
 # fly.staging.toml — p5 API (staging)
 app = "p5-api-staging"
-primary_region = "iad"
+primary_region = "sin"
 
 [build]
   dockerfile = "apps/api/Dockerfile"
@@ -10,13 +10,16 @@ primary_region = "iad"
   PORT = "3000"
   RATE_LIMIT_MAX = "100"
   RATE_LIMIT_TIME_WINDOW = "1 minute"
+  # CORS_ORIGINS comes from secrets; don't hardcode it here
 
+# Serve HTTP on 3000, keep at least one machine always running,
+# and DO NOT auto-stop machines (prevents cold starts/health timeouts).
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = true
   auto_start_machines = true
-  min_machines_running = 0
+  auto_stop_machines = "off"    # if your flyctl complains, use: false
+  min_machines_running = 1
   processes = ["app"]
 
   [http_service.concurrency]
@@ -24,6 +27,7 @@ primary_region = "iad"
     soft_limit = 25
     hard_limit = 50
 
+  # Ready check (DB reachable etc.)
   [[http_service.checks]]
     interval = "10s"
     timeout = "2s"
@@ -31,6 +35,19 @@ primary_region = "iad"
     method = "get"
     path = "/ready"
 
+# Optional extra liveness check hitting /health directly
+[checks]
+  [checks.health]
+    port = 3000
+    type = "http"
+    interval = "15s"
+    timeout = "3s"
+    grace_period = "20s"
+    method = "get"
+    path = "/health"
+
 [vm]
   size = "shared-cpu-1x"
   memory = "512MB"
+
+cmd = ["node", "apps/api/src/server.js"]
