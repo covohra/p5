@@ -11,7 +11,7 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY prisma/package.json prisma/package.json
 
-# Install all workspaces (no postinstall)
+# Install all workspaces (skip postinstall)
 RUN pnpm install --recursive --frozen-lockfile --ignore-scripts
 
 # Copy sources
@@ -19,9 +19,10 @@ COPY apps apps
 COPY prisma prisma
 
 # Create a pruned, self-contained prod bundle for ONLY @p5/api
+# NOTE: This writes the API package to /out with its own node_modules at /out/node_modules
 RUN pnpm deploy --filter @p5/api --prod --legacy /out
 
-# Generate Prisma client into the deployed bundle
+# Generate Prisma client into the deployed bundle (next to @prisma/client)
 ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=1
 ENV PRISMA_CLIENT_OUTPUT=/out/node_modules/.prisma/client
 WORKDIR /repo/prisma
@@ -41,17 +42,17 @@ RUN apt-get update -y \
 # Copy the deployed app with standalone node_modules AND generated client
 COPY --from=build /out /app
 
-# Optional: vector config for future log shipping (harmless if unused)
+# Optional: vector config for future log shipping (safe to keep)
 COPY ops/vector.toml /etc/vector/vector.toml
 
 # Healthcheck (Fastify /ready)
 HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD wget -qO- http://127.0.0.1:3000/ready || exit 1
 
-# Non-root for safety
+# Run as non-root
 USER node
 
 EXPOSE 3000
 
-# >>> Entry: run the API from the deployed bundle <<<
-# If your entry file is apps/api/src/server.js instead, change the path accordingly.
-CMD ["node", "apps/api/src/server.js"]
+# >>> Single source of truth: start the API from the deployed bundle <<<
+# After pnpm deploy, your API code is at /app/src, NOT /app/apps/api/src
+CMD ["node", "src/server.js"]

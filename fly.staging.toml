@@ -1,4 +1,5 @@
 # fly.staging.toml — p5 API (staging)
+
 app = "p5-api-staging"
 primary_region = "sin"
 
@@ -10,15 +11,13 @@ primary_region = "sin"
   PORT = "3000"
   RATE_LIMIT_MAX = "100"
   RATE_LIMIT_TIME_WINDOW = "1 minute"
-  # CORS_ORIGINS comes from secrets; don't hardcode it here
+# CORS_ORIGINS is a secret; do not hardcode
 
-# Serve HTTP on 3000, keep at least one machine always running,
-# and DO NOT auto-stop machines (prevents cold starts/health timeouts).
 [http_service]
   internal_port = 3000
   force_https = true
   auto_start_machines = true
-  auto_stop_machines = "off"    # if your flyctl complains, use: false
+  auto_stop_machines = false        # keep machines warm for health checks
   min_machines_running = 1
   processes = ["app"]
 
@@ -30,12 +29,11 @@ primary_region = "sin"
   # Ready check (DB reachable etc.)
   [[http_service.checks]]
     interval = "10s"
-    timeout = "2s"
+    timeout  = "2s"
     grace_period = "20s"
     method = "get"
-    path = "/ready"
+    path   = "/ready"
 
-# Optional extra liveness check hitting /health directly
 [checks]
   [checks.health]
     port = 3000
@@ -50,4 +48,5 @@ primary_region = "sin"
   size = "shared-cpu-1x"
   memory = "512MB"
 
-cmd = ["node", "apps/api/src/server.js"]
+# IMPORTANT: no cmd = [...] here.
+# Let the Dockerfile's CMD (node src/server.js) be the single source of truth.
