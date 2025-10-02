@@ -1,65 +1,45 @@
-// HS256 JWT (no external deps)
-import crypto from 'node:crypto';
+import fastifyJwt from '@fastify/jwt'
 
-// base64url helpers
-const b64url = (s) => Buffer.from(s).toString('base64url');
-const sign = (secret, data) =>
-  crypto.createHmac('sha256', secret).update(data).digest('base64url');
-
-function makeJWT(secret, payload, expSec = 2 * 60 * 60) {
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const now = Math.floor(Date.now() / 1000);
-  const p = { iat: now, exp: now + expSec, ...payload };
-  const H = b64url(JSON.stringify(header));
-  const P = b64url(JSON.stringify(p));
-  const S = sign(secret, ${H}.${P});
-  return ${H}.${P}.${S};
-}
-
-function verifyJWT(secret, token) {
-  const [H, P, S] = token.split('.');
-  if (!H || !P || !S) throw Object.assign(new Error('Bad token'), { statusCode: 401 });
-  const expected = sign(secret, ${H}.${P});
-  const a = Buffer.from(expected);
-  const b = Buffer.from(S);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    throw Object.assign(new Error('Bad signature'), { statusCode: 401 });
+export async function authPlugin(app, cfg) {
+  if (!cfg.jwtSecret) {
+    app.log.info('JWT disabled (no JWT_SECRET). /auth/login returns 501.')
+    app.get('/auth/login', async (_req, reply) =>
+      reply.code(501).send({ error: { code: 'AUTH_DISABLED', message: 'JWT not configured' } })
+    )
+    return
   }
-  const payload = JSON.parse(Buffer.from(P, 'base64').toString('utf8'));
-  if (payload.exp && Math.floor(Date.now() / 1000) > payload.exp) {
-    throw Object.assign(new Error('Token expired'), { statusCode: 401 });
-  }
-  return payload;
-}
 
-export default async function authPlugin(app, { jwtSecret }) {
-  // Public login -> returns JWT
-  app.post('/auth/login', {
-    schema: {
-      body: {
-        type: 'object',
-        required: ['email'],
-        properties: { email: { type: 'string', format: 'email', maxLength: 254 } },
-        additionalProperties: false,
-      },
-      response: {
-        200: { type: 'object', properties: { token: { type: 'string' } } },
+  await app.register(fastifyJwt, { secret: cfg.jwtSecret })
+
+  // Minimal login: email-only; returns a JWT
+  app.post(
+    '/auth/login',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['email'],
+          additionalProperties: false,
+          properties: { email: { type: 'string', format: 'email' } },
+        },
       },
     },
-  }, async (req) => {
-    const { email } = req.body;
-    const token = makeJWT(jwtSecret, { sub: email, email });
-    return { token };
-  });
+    async (req) => {
+      const { email } = req.body
+      const token = await app.jwt.sign({ sub: email, email }, { expiresIn: '8h' })
+      return { token }
+    },
+  )
 
-  // Decorator used as guard on /api/*
-  app.decorate('auth', async (req, _reply) => {
-    // In CI/tests we bypass auth to keep tests green
-    if (process.env.NODE_ENV === 'test') return;
-
-    const h = req.headers.authorization || '';
-    const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-    if (!token) throw Object.assign(new Error('Missing token'), { statusCode: 401 });
-    req.user = verifyJWT(jwtSecret, token);
-  });
+  // Guard /api/* (leave health/ready/version/metrics & /auth/login open)
+  app.addHook('preHandler', async (req, reply) => {
+    if (['/health', '/ready', '/version', '/metrics', '/auth/login'].includes(req.routerPath)) return
+    if (req.routerPath?.startsWith('/api')) {
+      try {
+        await req.jwtVerify()
+      } catch {
+        return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Invalid or missing token' } })
+      }
+    }
+  })
 }

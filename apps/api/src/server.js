@@ -1,16 +1,33 @@
-import { buildApp } from './app.js';
+import { config, assertConfig } from './config.js'
+import { buildApp } from './app.js'
 
-const PORT = Number(process.env.PORT ?? 3000);
-const HOST = '0.0.0.0';
+assertConfig()
 
-const app = await buildApp();
+const app = buildApp()
 
-const close = async () => {
-  try { await app.close(); } catch {}
-  process.exit(0);
-};
-process.on('SIGTERM', close);
-process.on('SIGINT', close);
+app.log.info(
+  { env: config.env, port: config.port, cors: config.corsOrigins, metrics: config.metricsEnabled },
+  'Starting API'
+)
 
-await app.listen({ port: PORT, host: HOST });
-app.log.info(`API listening on http://${HOST}:${PORT}`);
+app
+  .listen({ host: '0.0.0.0', port: config.port })
+  .then(() => app.log.info(`API listening on http://localhost:${config.port}`))
+  .catch((err) => {
+    app.log.error({ err }, 'Startup failed')
+    process.exit(1)
+  })
+
+const shutdown = async (sig) => {
+  app.log.info({ sig }, 'Shutting down')
+  try {
+    await app.close()
+    process.exit(0)
+  } catch (err) {
+    app.log.error({ err }, 'Shutdown error')
+    process.exit(1)
+  }
+}
+
+process.on('SIGINT',  () => shutdown('SIGINT'))
+process.on('SIGTERM', () => shutdown('SIGTERM'))

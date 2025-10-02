@@ -34,7 +34,10 @@ jobs:
       RATE_LIMIT_MAX: "100"
       RATE_LIMIT_TIME_WINDOW: "1 minute"
       PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
+      # Generate client inside API package (this path is proven OK for staging)
       PRISMA_CLIENT_OUTPUT: ${{ github.workspace }}/apps/api/node_modules/.prisma/client
+      JWT_SECRET: ci_secret_for_tests
+      CORS_ORIGINS: "*"
 
     steps:
       - name: 🧾 Checkout
@@ -70,16 +73,28 @@ jobs:
       - name: 🛫 Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
+      - name: 🔐 Verify Fly token
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "${FLY_API_TOKEN}" ]; then
+            echo "FLY_API_TOKEN is missing. Add it in GitHub → Settings → Secrets → Actions."
+            exit 1
+          fi
+
+      - name: Tag GIT_SHA on staging app
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          echo "Setting GIT_SHA=${{ github.sha }} on app p5-api-staging ..."
+          flyctl secrets set GIT_SHA="${{ github.sha }}" -a p5-api-staging
+
       - name: 🚀 Deploy to Fly (staging)
-        if: ${{ success() }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: timeout 15m flyctl deploy --remote-only --app p5-api-staging
 
-      # -----------------------
-      # Post-deploy smoke test
-      # -----------------------
-      - name: 🔎 Install jq (for JSON parsing)
+      - name: 🔎 Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: 🩺 Smoke test against staging
@@ -100,11 +115,9 @@ jobs:
             sleep 2
           done
 
-          # Verify health and version
           echo "Health:"  && curl -s "$APP_URL/health"
           echo "Version:" && curl -s "$APP_URL/version"
 
-          # Create a user
           email="ci-stg-$(date +%s)@example.com"
           echo "Creating user: $email"
           created=$(curl -s -H "Content-Type: application/json" \
@@ -115,11 +128,9 @@ jobs:
           id=$(echo "$created" | jq -r '.id')
           [ -n "$id" ] && [ "$id" != "null" ] || { echo "❌ No user id returned"; exit 1; }
 
-          # List and assert presence
           list=$(curl -s "$APP_URL/api/users")
           echo "$list" | jq -r '.[].email' | grep -q "$email" || { echo "❌ user not found in list"; exit 1; }
 
-          # Delete
           delCode=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$APP_URL/api/users/$id")
           [ "$delCode" = "204" ] || { echo "❌ delete failed with $delCode"; exit 1; }
 

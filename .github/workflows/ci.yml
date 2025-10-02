@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
-    # Ephemeral Postgres for tests
     services:
       postgres:
         image: postgres:16
@@ -35,8 +34,11 @@ jobs:
       RATE_LIMIT_MAX: "100"
       RATE_LIMIT_TIME_WINDOW: "1 minute"
       PRISMA_GENERATE_SKIP_AUTOINSTALL: "1"
-      # Generate Prisma client where @prisma/client expects it (repo root node_modules)
+      # Generate Prisma client where @prisma/client expects it when imported from root
       PRISMA_CLIENT_OUTPUT: ${{ github.workspace }}/node_modules/.prisma/client
+      # minimal prod-ready app envs for tests
+      JWT_SECRET: ci_secret_for_tests
+      CORS_ORIGINS: "*"
 
     steps:
       - name: Checkout
@@ -47,7 +49,6 @@ jobs:
         with:
           node-version: 20
 
-      # Use pnpm version from package.json "packageManager"
       - name: pnpm setup
         uses: pnpm/action-setup@v4
         with:
@@ -56,7 +57,6 @@ jobs:
       - name: Install deps (no postinstall)
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      # Run Prisma from the @p5/prisma workspace (CWD == prisma/)
       - name: Prisma generate (into root .prisma/client)
         run: |
           pnpm --filter @p5/prisma exec prisma generate --schema ./schema.prisma
@@ -76,16 +76,40 @@ jobs:
         uses: superfly/flyctl-actions/setup-flyctl@v1
 
       - name: Verify Fly token is present
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           if [ -z "${FLY_API_TOKEN}" ]; then
             echo "FLY_API_TOKEN is missing. Add it in GitHub → Settings → Secrets → Actions."
             exit 1
           fi
+
+      # Attach commit SHA for /version endpoint
+      - name: Set GIT_SHA secret on Fly (prod)
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          echo "Setting GIT_SHA=${{ github.sha }} on app p5-api ..."
+          flyctl secrets set GIT_SHA="${{ github.sha }}" -a p5-api
 
-      - name: Deploy to Fly
-        if: ${{ success() }}
+      - name: Deploy to Fly (prod)
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: timeout 15m flyctl deploy --remote-only --app p5-api
+
+      - name: Smoke test deployed API
+        env:
+          APP_URL: https://p5-api.fly.dev
+        run: |
+          echo "Probing $APP_URL/health ..."
+          for i in {1..30}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/health" || true)
+            if [ "$code" = "200" ]; then
+              echo "Health check OK (200)."
+              exit 0
+            fi
+            echo "Attempt $i/30 ... got $code, retrying in 2s"
+            sleep 2
+          done
+          echo "Health check failed after retries."
+          exit 1
