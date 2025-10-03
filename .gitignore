@@ -1,29 +1,51 @@
-# package management 
-node_modules/
-.pnpm-store/ 
-
-# prisma generated & local 
-.prisma/ 
-prisma/node_modules/ 
-prisma/.cache/ 
-prisma/.env 
-
-# env files 
-.env 
-.env.* 
-*.local 
-
-# runtime data 
-storage/ 
-**/dump.rdb 
-**/postmaster.pid 
-
-# snapshots / local artifacts 
-project-snapshot/ 
-project-snapshot*.zip 
-*.log 
-
-# OS & editor 
-.DS_Store 
-Thumbs.db 
+# --- IDE / OS ---
 .vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Node / pnpm ---
+**/node_modules/
+.pnpm-store/
+pnpm-debug.log*
+
+# --- Builds / coverage ---
+dist/
+build/
+coverage/
+*.log
+
+# --- Tests (artifacts/patterns only; keep sources tracked) ---
+*/.test.*
+*/.spec.*
+
+# --- Prisma (generated/cache/local env) ---
+.prisma/
+prisma/node_modules/
+prisma/.cache/
+prisma/.env
+
+# --- Env files (never commit secrets) ---
+.env
+.env.*
+*.local
+
+# --- Runtime data (local only) ---
+storage/
+**/dump.rdb
+**/postmaster.pid
+
+# --- Snapshots / local artifacts ---
+project-snapshot/
+project-snapshot*.zip
+
+# --- Backups & DB dumps (very important) ---
+backups/
+*.dump
+*.sql
+*.sql.gz
+*.tar.gz
+
+# --- Docker/dev only configs not needed in repo builds ---
+docker-compose.override.yml
+*.local.yml

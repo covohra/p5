@@ -1,34 +1,31 @@
-# Git
+# --- node modules & caches ---
+**/node_modules/
+.pnpm-store/
+pnpm-debug.log*
+
+# --- git ---
 .git
 .gitignore
 
-# Node / pnpm
-**/node_modules
-**/.pnpm-store
-pnpm-debug.log*
+# --- tests & local-only files ---
+*/.test.*
+*/.spec.*
+coverage/
+.vscode/
+.DS_Store
+Thumbs.db
 
-# Local env
+# --- env files (never send to Docker context) ---
 .env
 .env.*
-
-# Prisma cache
-.prisma
-
-# Runtime / storage
-storage
-dump.rdb
-postmaster.pid
-
-# Snapshots / misc
-project-snapshot
-
-# Docker configs (not needed inside image)
-Dockerfile
-docker-compose.yml
 prisma/.env
-**/test
-*/.spec.*
-*/.test.*
-coverage
-.vscode
-.DS_Store
+
+# --- backups & dumps (keep image/context tiny) ---
+backups/
+*.dump
+*.sql
+*.sql.gz
+*.tar.gz
+
+# --- prisma generated cache in dev ---
+.prisma/
