@@ -46,7 +46,8 @@ WORKDIR /app
 # Copy node_modules (with generated Prisma client) and app sources
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/apps/api   /app/apps/api
-COPY --from=build /app/prisma     /app/prisma  # keep schema for ops/studio
+# keep schema for ops/studio
+COPY --from=build /app/prisma /app/prisma
 
 EXPOSE 3000
 CMD ["node", "apps/api/src/server.js"]
