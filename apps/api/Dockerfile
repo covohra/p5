@@ -51,3 +51,4 @@ COPY --from=build /app/prisma /app/prisma
 
 EXPOSE 3000
 CMD ["node", "apps/api/src/server.js"]
+
