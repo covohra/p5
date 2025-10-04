@@ -3,17 +3,23 @@
   "version": "0.1.0",
   "type": "module",
   "main": "src/server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js",
+    "dev": "node -r dotenv/config --watch src/server.js",
+    "start": "node -r dotenv/config src/server.js",
     "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "echo \"(optional)\"",
-    "prisma:generate": "prisma generate --schema ../../prisma/schema.prisma"
+    "prisma:generate": "prisma generate --schema ../../prisma/schema.prisma",
+    "prisma:migrate:deploy": "prisma migrate deploy --schema ../../prisma/schema.prisma",
+    "prisma:migrate:dev": "prisma migrate dev --schema ../../prisma/schema.prisma"
   },
   "dependencies": {
-    "@fastify/cors": "^10.0.0",
+    "@fastify/cors": "^10.1.0",
     "@fastify/jwt": "^9.1.0",
-    "@fastify/rate-limit": "^10.0.0",
+    "@fastify/rate-limit": "^10.3.0",
     "@prisma/client": "5.22.0",
     "dotenv": "^16.4.5",
     "fastify": "^5.0.0",

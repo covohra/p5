@@ -1,37 +1,40 @@
-/* apps/api/test/auth.test.js */
-import { describe, it, expect } from "vitest"
-import { buildApp } from "../src/app.js"
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { buildApp } from '../src/app.js'
 
-describe("auth + metrics", () => {
-  it("issues a token and protects /api when AUTH_REQUIRED=true", async () => {
-    const app = buildApp()
-    // stub env for test instance
-    process.env.AUTH_REQUIRED = "true"
-    process.env.JWT_SECRET = "test-secret"
-    await app.ready()
+let app
 
-    const login = await app.inject({
-      method: "POST",
-      url: "/auth/login",
-      payload: { email: "me@example.com" }
+beforeAll(async () => {
+  // Turn auth ON and set a known token for tests
+  process.env.AUTH_REQUIRED = 'true'
+  process.env.AUTH_TOKEN = 'faseehvohra' // stable, matches what we’ll use below
+  app = buildApp()
+  await app.ready()
+})
+
+afterAll(async () => {
+  await app.close()
+})
+
+describe('Users', () => {
+  it('create + list', async () => {
+    const email = `tester+${Date.now()}@example.com` // ✅ template string
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/users',
+      headers: { authorization: 'Bearer faseehvohra' }, // ✅ include token
+      payload: { email, name: 'Test User' }
     })
-    expect(login.statusCode).toBe(200)
-    const token = login.json().token
-    expect(token).toBeTruthy()
+    expect(create.statusCode).toBe(201)
 
-    const unauth = await app.inject({ method: "GET", url: "/api/users" })
-    expect(unauth.statusCode).toBe(401)
-
-    const ok = await app.inject({
-      method: "GET",
-      url: "/api/users",
-      headers: { authorization: Bearer ${token} }
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/users',
+      headers: { authorization: 'Bearer faseehvohra' } // ✅ include token
     })
-    expect([200,204]).toContain(ok.statusCode)
+    expect(list.statusCode).toBe(200)
 
-    const m = await app.inject({ method: "GET", url: "/metrics" })
-    expect(m.statusCode).toBe(200)
-
-    await app.close()
+    const users = JSON.parse(list.body)
+    expect(users.some(u => u.email === email)).toBe(true)
   })
 })

@@ -1,1 +1,26 @@
+# Default: normalize to LF in repo (git will convert to your OS on checkout)
 * text=auto eol=lf
+
+# Keep Windows-native endings for PowerShell scripts (avoids warnings on commit)
+*.ps1 text eol=crlf
+
+# Shell scripts must stay LF
+*.sh  text eol=lf
+
+# Keep JSON/YAML normalized (LF)
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Don’t normalize binaries
+*.png  -text
+*.jpg  -text
+*.jpeg -text
+*.gif  -text
+*.ico  -text
+*.pdf  -text
+*.zip  -text
+*.gz   -text
+*.tgz  -text
+*.woff -text
+*.woff2 -text

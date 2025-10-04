@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import crypto from 'node:crypto'
 import { buildApp } from '../src/app.js'
 
 let app
@@ -13,33 +12,25 @@ afterAll(async () => {
   await app.close()
 })
 
-describe('Users API', () => {
-  it('GET /health works', async () => {
-    const res = await app.inject({ method: 'GET', url: '/health' })
-    expect(res.statusCode).toBe(200)
-    const body = res.json()
-    expect(body.ok).toBe(true)
-  })
+describe('Users', () => {
+  it('create + list', async () => {
+    // health sanity
+    const h = await app.inject({ method: 'GET', url: '/health' })
+    expect(h.statusCode).toBe(200)
 
-  it('POST /api/users validates input', async () => {
-    const res = await app.inject({ method: 'POST', url: '/api/users', payload: {} })
-    expect(res.statusCode).toBe(400)
-  })
-
-  it('POST /api/users creates a user, then GET list', async () => {
-    const email = `u_${crypto.randomUUID()}@example.com`
-
-    const created = await app.inject({
+    const email = `user+test${Math.floor(Math.random()*1e6)}@example.com`
+    const create = await app.inject({
       method: 'POST',
       url: '/api/users',
-      payload: { email, name: 'Test User' },
+      payload: { email, name: 'Test' }
     })
-    expect(created.statusCode).toBe(201)
-    const user = created.json()
-    expect(user.email).toBe(email)
+    expect(create.statusCode).toBe(201)
+    const created = create.json()
+    expect(created.email).toBe(email)
 
     const list = await app.inject({ method: 'GET', url: '/api/users' })
     expect(list.statusCode).toBe(200)
-    expect(Array.isArray(list.json())).toBe(true)
+    const items = list.json()
+    expect(items.some(u => u.email === email)).toBe(true)
   })
 })

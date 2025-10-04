@@ -3,7 +3,7 @@ app = "p5-api"
 primary_region = "iad"
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "apps/api/Dockerfile"
 
   dockerfile = "apps/api/Dockerfile"
 

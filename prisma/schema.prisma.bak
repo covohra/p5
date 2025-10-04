@@ -1,0 +1,19 @@
+generator client {
+  provider = "prisma-client-js"
+  // We'll point this at the deployed bundle during the Docker build
+  output   = env("PRISMA_CLIENT_OUTPUT")
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
