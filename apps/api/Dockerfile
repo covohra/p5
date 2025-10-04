@@ -1,22 +1,11 @@
-# ---------- base (runtime) ----------
-FROM node:20-slim AS base
-WORKDIR /app
-ENV NODE_ENV=production \
-    PORT=3000
-
-# Runtime libs for Prisma & HTTPS
-RUN apt-get update -y \
-  && apt-get install -y --no-install-recommends ca-certificates libssl3 openssl \
-  && rm -rf /var/lib/apt/lists/*
-
 # ---------- build ----------
 FROM node:20-slim AS build
 WORKDIR /app
 
-# Build-time libs + pnpm
+# OS deps + pnpm
 RUN apt-get update -y \
-  && apt-get install -y --no-install-recommends ca-certificates libssl3 openssl \
-  && rm -rf /var/lib/apt/lists/*
+ && apt-get install -y --no-install-recommends ca-certificates openssl libssl3 \
+ && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # Workspace manifests first (better cache)
@@ -24,31 +13,34 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY prisma/package.json   ./prisma/package.json
 
-# Install deps WITHOUT running postinstall scripts (prevents prisma auto-generate)
+# Install WITHOUT postinstall scripts
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # Copy sources
 COPY apps/api ./apps/api
 COPY prisma   ./prisma
 
-# Sanity: ensure schema exists
-RUN test -f prisma/schema.prisma
-
-# Generate Prisma client directly into the API package
+# ---- Prisma generate INTO the API package ----
+# (pnpm sets CWD to the prisma workspace; so use ./schema.prisma)
 ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=1
-ENV ENV PRISMA_CLIENT_OUTPUT=/app/node_modules/.prisma/client
+ENV PRISMA_CLIENT_OUTPUT=/app/apps/api/node_modules/.prisma/client
 RUN pnpm --filter @p5/prisma exec prisma generate --schema ./schema.prisma
 
-# ---------- final (runtime) ----------
-FROM base
+# ---------- runtime ----------
+FROM node:20-slim AS runtime
 WORKDIR /app
+ENV NODE_ENV=production
+RUN apt-get update -y \
+ && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+ && rm -rf /var/lib/apt/lists/*
 
-# Copy node_modules (with generated Prisma client) and app sources
+# Copy the app, deps, and generated client
+COPY --from=build /app/apps/api /app/apps/api
 COPY --from=build /app/node_modules /app/node_modules
-COPY --from=build /app/apps/api   /app/apps/api
-# keep schema for ops/studio
-COPY --from=build /app/prisma /app/prisma
 
+# Optional vector config (harmless if unused)
+COPY ops/vector.toml /etc/vector/vector.toml
+
+ENV PORT=3000
 EXPOSE 3000
 CMD ["node", "apps/api/src/server.js"]
-

@@ -18,7 +18,7 @@ app
     process.exit(1)
   })
 
-const shutdown = async (sig) => {
+async function shutdown(sig) {
   app.log.info({ sig }, 'Shutting down')
   try {
     await app.close()
