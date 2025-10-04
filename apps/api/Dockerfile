@@ -36,7 +36,7 @@ RUN test -f prisma/schema.prisma
 
 # Generate Prisma client directly into the API package
 ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=1
-ENV PRISMA_CLIENT_OUTPUT=/app/apps/api/node_modules/.prisma/client
+ENV ENV PRISMA_CLIENT_OUTPUT=/app/node_modules/.prisma/client
 RUN pnpm --filter @p5/prisma exec prisma generate --schema ./schema.prisma
 
 # ---------- final (runtime) ----------
