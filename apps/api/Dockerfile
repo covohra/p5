@@ -22,9 +22,13 @@ COPY prisma   ./prisma
 
 # ---- Prisma generate INTO the API package ----
 # (pnpm sets CWD to the prisma workspace; so use ./schema.prisma)
+# Generate client where @prisma/client will look for it at runtime
 ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=1
-ENV PRISMA_CLIENT_OUTPUT=/app/apps/api/node_modules/.prisma/client
-RUN pnpm --filter @p5/prisma exec prisma generate --schema ./schema.prisma
+ENV PRISMA_CLIENT_OUTPUT=/app/node_modules/.prisma/client
+
+WORKDIR /repo/prisma
+RUN pnpm --filter @p5/prisma exec prisma generate --schema ./schema.prisma \
+ && ls -la /app/node_modules/.prisma/client
 
 # ---------- runtime ----------
 FROM node:20-slim AS runtime
@@ -43,4 +47,4 @@ COPY ops/vector.toml /etc/vector/vector.toml
 
 ENV PORT=3000
 EXPOSE 3000
-CMD ["node", "apps/api/src/index.js"]
+CMD ["node", "apps/api/src/server.js"]
