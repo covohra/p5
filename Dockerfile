@@ -20,20 +20,20 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY apps/api ./apps/api
 COPY prisma   ./prisma
 
-# ---- Prisma generate INTO the API package ----
-# (pnpm sets CWD to the prisma workspace; so use ./schema.prisma)
-# Generate client where @prisma/client will look for it at runtime
+# ---- Prisma generate INTO root node_modules for @prisma/client ----
+# Keep WORKDIR at /app so pnpm sees the workspace!
 ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=1
 ENV PRISMA_CLIENT_OUTPUT=/app/node_modules/.prisma/client
 
-WORKDIR /repo/prisma
-RUN pnpm --filter @p5/prisma exec prisma generate --schema ./schema.prisma \
+# Generate using the prisma workspace and the repo schema path
+RUN pnpm --filter @p5/prisma exec prisma generate --schema prisma/schema.prisma \
  && ls -la /app/node_modules/.prisma/client
 
 # ---------- runtime ----------
 FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+
 RUN apt-get update -y \
  && apt-get install -y --no-install-recommends ca-certificates libssl3 \
  && rm -rf /var/lib/apt/lists/*
@@ -42,7 +42,7 @@ RUN apt-get update -y \
 COPY --from=build /app/apps/api /app/apps/api
 COPY --from=build /app/node_modules /app/node_modules
 
-# Optional vector config (harmless if unused)
+# Optional vector config (safe if unused)
 COPY ops/vector.toml /etc/vector/vector.toml
 
 ENV PORT=3000

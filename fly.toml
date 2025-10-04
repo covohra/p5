@@ -3,11 +3,13 @@ app = "p5-api"
 primary_region = "iad"
 
 [build]
+  dockerfile = "Dockerfile"
+
   dockerfile = "apps/api/Dockerfile"
 
 [env]
   NODE_ENV = "production"
-  PORT = "3000"
+  PORT = "80"
   RATE_LIMIT_MAX = "100"
   RATE_LIMIT_TIME_WINDOW = "1 minute"
 

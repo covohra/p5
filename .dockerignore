@@ -28,4 +28,5 @@ backups/
 *.tar.gz
 
 # --- prisma generated cache in dev ---
-.prisma/
+.prisma/!.prisma
+!prisma
