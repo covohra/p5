@@ -8,16 +8,16 @@ primary_region = "sin"
 
 [env]
   NODE_ENV = "staging"
-  PORT = "3000"
+  PORT = "80"                       # 👈 force app to listen on 80
   RATE_LIMIT_MAX = "100"
   RATE_LIMIT_TIME_WINDOW = "1 minute"
-# CORS_ORIGINS is a secret; do not hardcode
+  # CORS_ORIGINS stays as a secret
 
 [http_service]
-  internal_port = 3000
+  internal_port = 80                # 👈 must match the app’s listening port
   force_https = true
   auto_start_machines = true
-  auto_stop_machines = false        # keep machines warm for health checks
+  auto_stop_machines = false
   min_machines_running = 1
   processes = ["app"]
 
@@ -26,7 +26,7 @@ primary_region = "sin"
     soft_limit = 25
     hard_limit = 50
 
-  # Ready check (DB reachable etc.)
+  # Ready check (DB reachability)
   [[http_service.checks]]
     interval = "10s"
     timeout  = "2s"
@@ -36,7 +36,7 @@ primary_region = "sin"
 
 [checks]
   [checks.health]
-    port = 3000
+    port = 80                       # 👈 health check hits 80 too
     type = "http"
     interval = "15s"
     timeout = "3s"
