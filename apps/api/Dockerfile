@@ -43,4 +43,4 @@ COPY ops/vector.toml /etc/vector/vector.toml
 
 ENV PORT=3000
 EXPOSE 3000
-CMD ["node", "apps/api/src/server.js"]
+CMD ["node", "apps/api/src/index.js"]
