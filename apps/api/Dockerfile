@@ -8,26 +8,31 @@ RUN apt-get update -y \
  && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Workspace manifests first (better cache)
+# Workspace manifests first (cache-friendly)
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY prisma/package.json   ./prisma/package.json
 
-# Install WITHOUT postinstall scripts
+# Install WITHOUT running postinstall scripts
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # Copy sources
 COPY apps/api ./apps/api
 COPY prisma   ./prisma
 
-# ---- Prisma generate INTO root node_modules for @prisma/client ----
-# Keep WORKDIR at /app so pnpm sees the workspace!
+# ---- Generate Prisma client into root node_modules for @prisma/client ----
+# Move into the prisma workspace so the schema path is unambiguous
 ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=1
-ENV PRISMA_CLIENT_OUTPUT=/app/node_modules/.prisma/client
 
-# Generate using the prisma workspace and the repo schema path
-RUN pnpm --filter @p5/prisma exec prisma generate --schema prisma/schema.prisma \
- && ls -la /app/node_modules/.prisma/client
+WORKDIR /app/prisma
+# sanity check the schema exists (will fail the build early if not)
+RUN test -f ./schema.prisma && echo "✅ Found prisma/schema.prisma"
+
+# Use the prisma workspace to run CLI; schema path is local (./schema.prisma)
+RUN pnpm --filter @p5/prisma exec prisma generate --schema ./schema.prisma
+
+# back to repo root for next stage copy clarity
+WORKDIR /app
 
 # ---------- runtime ----------
 FROM node:20-slim AS runtime
@@ -38,7 +43,7 @@ RUN apt-get update -y \
  && apt-get install -y --no-install-recommends ca-certificates libssl3 \
  && rm -rf /var/lib/apt/lists/*
 
-# Copy the app, deps, and generated client
+# Copy the app, deps, and the generated Prisma client
 COPY --from=build /app/apps/api /app/apps/api
 COPY --from=build /app/node_modules /app/node_modules
 

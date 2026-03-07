@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  output   = env("PRISMA_CLIENT_OUTPUT")
 }
 
 datasource db {
@@ -9,10 +8,25 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String?  @db.VarChar(255)
+
+  role         Role     @default(USER)
+
+  // --- audit basics ---
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?  // soft-delete ready; NOT enforced yet
+
+  // --- prep for multi-org/tenant (future use, no FK yet) ---
+  orgId        String?   @db.VarChar(36)
+
+  @@index([orgId])        // safe to future-proof now
 }
 
+enum Role {
+  USER
+  ADMIN
+}

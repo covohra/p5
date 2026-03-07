@@ -1,58 +1,76 @@
-import 'dotenv/config'
-import { buildApp } from './app.js'
-import { config, assertConfig } from './config.js'
+import 'dotenv/config';
+import { buildApp } from './app.js';
+import { config, assertConfig } from './config.js';
 
-// Validate required env/config (throws with a clear message if missing)
-assertConfig()
+// 1) Validate env/config early (fail fast with a clear message)
+assertConfig();
 
-// Build the Fastify app (registers /health, /ready, /api/*, etc.)
-const app = buildApp()
+// 2) Derive host/port once
+const HOST = process.env.HOST || '0.0.0.0';
+const PORT = Number(process.env.PORT ?? config.port ?? 3000);
 
-// Helpful diagnostics so we’re sure Prisma resolves in the container
-try {
-  // Where @prisma/client is being loaded from
-  const prismaClientEntry = require.resolve('@prisma/client')
-  // Where the generated client must exist at runtime
-  const expectedGeneratedDir = '/app/node_modules/.prisma/client'
-  app.log.info({ prismaClientEntry, expectedGeneratedDir }, 'Prisma resolution check')
-} catch (e) {
-  app.log.warn({ err: e }, 'Could not resolve @prisma/client at startup')
-}
+// 3) Build Fastify app (app.js sets CORS, rate-limit, routes, /version, etc.)
+const app = buildApp();
 
-const HOST = '0.0.0.0'
-const PORT = Number(config.port ?? process.env.PORT ?? 3000)
+// 4) Optional: Prisma resolution probe (non-fatal)
+(async () => {
+  try {
+    await import('@prisma/client');
+    app.log.info({ ok: true }, 'Prisma client is resolvable');
+  } catch (err) {
+    // Not fatal; CI/dev images sometimes generate at runtime
+    app.log.warn({ err }, 'Prisma client not resolvable at startup');
+  }
+})();
 
-// Startup banner
+// 5) Extra safety nets: log and keep process healthy
+process.on('unhandledRejection', (reason) => {
+  app.log.error({ reason }, 'Unhandled promise rejection');
+});
+process.on('uncaughtException', (err) => {
+  app.log.error({ err }, 'Uncaught exception');
+  // Optional: decide whether to exit(1) here; we let graceful shutdown handle it
+});
+
+// 6) Startup banner
 app.log.info(
   {
-    env: config.env,
+    env: process.env.NODE_ENV || config.env || 'development',
+    host: HOST,
     port: PORT,
-    cors: config.corsOrigins,
-    metrics: config.metricsEnabled,
+    cors: process.env.CORS_ORIGINS || config.corsOrigins || '*',
+    rateLimit: {
+      max: Number(process.env.RATE_LIMIT_MAX ?? 100),
+      window: process.env.RATE_LIMIT_TIME_WINDOW ?? '1 minute',
+    },
   },
-  'Starting API'
-)
+  'Starting API…'
+);
 
-// Start HTTP server
+// 7) Start HTTP server
 app
   .listen({ host: HOST, port: PORT })
-  .then(() => app.log.info(`✅ API listening on http://${HOST}:${PORT}`))
-  .catch((err) => {
-    app.log.error({ err }, '❌ Startup failed')
-    process.exit(1)
+  .then(() => {
+    app.log.info(`✅ API listening on http://${HOST}:${PORT}`);
   })
+  .catch((err) => {
+    app.log.error({ err }, '❌ Startup failed');
+    process.exit(1);
+  });
 
-// Graceful shutdown
-async function shutdown(sig) {
-  app.log.info({ sig }, 'Shutting down...')
+// 8) Graceful shutdown (SIGINT/SIGTERM)
+const shutdown = async (sig) => {
+  app.log.info({ sig }, 'Shutting down…');
   try {
-    await app.close()
-    process.exit(0)
+    await app.close(); // triggers prisma.$disconnect() via onClose hook in app.js
+    app.log.info('✅ Clean shutdown complete');
+    process.exit(0);
   } catch (err) {
-    app.log.error({ err }, 'Shutdown error')
-    process.exit(1)
+    app.log.error({ err }, 'Shutdown error');
+    process.exit(1);
   }
-}
+};
+
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => shutdown(sig))
+  process.on(sig, () => shutdown(sig));
 }

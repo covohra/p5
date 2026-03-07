@@ -5,9 +5,7 @@ primary_region = "iad"
 [build]
   dockerfile = "apps/api/Dockerfile"
 
-  dockerfile = "apps/api/Dockerfile"
-
-[env]
+  [env]
   NODE_ENV = "production"
   PORT = "80"
   RATE_LIMIT_MAX = "100"
