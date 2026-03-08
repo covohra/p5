@@ -51,7 +51,7 @@ app.log.info(
 app
   .listen({ host: HOST, port: PORT })
   .then(() => {
-    app.log.info(`✅ API listening on http://${HOST}:${PORT}`);
+    app.log.info(`API listening on http://${HOST}:${PORT}`);
   })
   .catch((err) => {
     app.log.error({ err }, '❌ Startup failed');

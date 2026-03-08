@@ -6,6 +6,7 @@ import pkg from '@prisma/client'
 import { getVersionInfo } from './version.js'
 import * as prom from 'prom-client'
 import { getMailer, sendMail } from './email.js'
+import errorPlugin from './errors.js'
 
 const { PrismaClient } = pkg
 
@@ -38,6 +39,9 @@ export function buildApp() {
   app.decorate('mailer', getMailer())
   app.decorate('sendMail', sendMail)
 
+  // ---- Global error handler ----
+  app.register(errorPlugin)
+
   // ---- JWT (only if configured) ----
   if (JWT_SECRET) {
     app.register(jwtPlugin, { secret: JWT_SECRET })
@@ -51,29 +55,37 @@ export function buildApp() {
     const reqCounter = new prom.Counter({
       name: 'http_requests_total',
       help: 'Total HTTP requests',
-      labelNames: ['route', 'method', 'status_code']
+      labelNames: ['route', 'method', 'status_code'],
+      registers: [registry]
     })
 
     const reqDuration = new prom.Histogram({
       name: 'http_request_duration_seconds',
       help: 'HTTP request duration',
       labelNames: ['route', 'method', 'status_code'],
-      buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5]
+      buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5],
+      registers: [registry]
     })
 
-    registry.registerMetric(reqCounter)
-    registry.registerMetric(reqDuration)
+    app.addHook('onRequest', async (req) => {
+      req.requestStartTime = process.hrtime.bigint()
+    })
 
     app.addHook('onResponse', async (req, reply) => {
-      const route = req.routerPath || req.url || 'unknown'
+      const route = req.routeOptions?.url || req.url || 'unknown'
       const labels = {
         route,
         method: req.method,
         status_code: String(reply.statusCode)
       }
+
       reqCounter.inc(labels)
-      // placeholder timing until full timer hook is added
-      reqDuration.observe(labels, 0.001)
+
+      if (req.requestStartTime) {
+        const durationNs = process.hrtime.bigint() - req.requestStartTime
+        const durationSeconds = Number(durationNs) / 1e9
+        reqDuration.observe(labels, durationSeconds)
+      }
     })
 
     app.get('/metrics', async (req, reply) => {
@@ -81,7 +93,9 @@ export function buildApp() {
         const auth = req.headers['authorization'] || ''
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
         if (token !== METRICS_TOKEN) {
-          return reply.code(401).send('unauthorized')
+          return reply.code(401).send({
+            error: { code: 'UNAUTHORIZED', message: 'Unauthorized' }
+          })
         }
       }
 
@@ -100,7 +114,8 @@ export function buildApp() {
     try {
       await prisma.$queryRaw`SELECT 1`
       return { ready: true }
-    } catch {
+    } catch (err) {
+      app.log.error({ err }, 'Readiness check failed')
       return reply.code(503).send({ ready: false })
     }
   })
@@ -108,7 +123,19 @@ export function buildApp() {
   app.get('/version', async () => getVersionInfo())
 
   // ---- Simple env-backed login (optional) ----
-  app.post('/auth/login', async (req, reply) => {
+  app.post('/auth/login', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['email', 'password'],
+        additionalProperties: false,
+        properties: {
+          email: { type: 'string', format: 'email', maxLength: 254 },
+          password: { type: 'string', minLength: 1, maxLength: 200 }
+        }
+      }
+    }
+  }, async (req, reply) => {
     if (!JWT_SECRET) {
       return reply.code(501).send({
         error: { code: 'NO_JWT', message: 'JWT not configured' }
@@ -141,7 +168,7 @@ export function buildApp() {
   app.addHook('preHandler', async (req, reply) => {
     if (!REQUIRE_AUTH) return
 
-    const routePath = req.routerPath || req.url || ''
+    const routePath = req.routeOptions?.url || req.url || ''
     if (openPaths.has(routePath)) return
 
     if (!JWT_SECRET) {
@@ -159,15 +186,15 @@ export function buildApp() {
     }
   })
 
-  // ---- API (rate-limited) ----
-  app.register(async (api) => {
+  // ---- API routes plugin ----
+  async function apiRoutes(api) {
     await api.register(rateLimit, {
       max: Number(process.env.RATE_LIMIT_MAX ?? 100),
       timeWindow: process.env.RATE_LIMIT_TIME_WINDOW ?? '1 minute'
     })
 
     // List users
-    api.get('/users', async () => prisma.user.findMany())
+    api.get('/users', async () => api.prisma.user.findMany())
 
     // Create user
     api.post('/users', {
@@ -181,15 +208,18 @@ export function buildApp() {
             name: { type: 'string', minLength: 1, maxLength: 120, nullable: true }
           }
         }
-      },
-      handler: async (req, reply) => {
-        const { email, name } = req.body ?? {}
-        const user = await prisma.user.create({ data: { email, name } })
-        return reply.code(201).send(user)
       }
+    }, async (req, reply) => {
+      const { email, name } = req.body ?? {}
+
+      const user = await api.prisma.user.create({
+        data: { email, name }
+      })
+
+      return reply.code(201).send(user)
     })
 
-    // Delete user by id
+    // Delete user
     api.delete('/users/:id', {
       schema: {
         params: {
@@ -199,23 +229,29 @@ export function buildApp() {
             id: { type: 'string', minLength: 1 }
           }
         }
-      },
-      handler: async (req, reply) => {
-        const { id } = req.params
-        try {
-          await prisma.user.delete({ where: { id } })
-          return reply.code(204).send()
-        } catch (err) {
-          if (err?.code === 'P2025') {
-            return reply.code(404).send({ message: 'User not found' })
-          }
-          req.log.error({ err }, 'delete /users/:id failed')
-          return reply.code(500).send({ message: 'Internal Server Error' })
+      }
+    }, async (req, reply) => {
+      const { id } = req.params
+
+      try {
+        await api.prisma.user.delete({ where: { id } })
+        return reply.code(204).send()
+      } catch (err) {
+        if (err?.code === 'P2025') {
+          return reply.code(404).send({
+            error: { code: 'NOT_FOUND', message: 'User not found' }
+          })
         }
+
+        req.log.error({ err }, 'delete /users/:id failed')
+
+        return reply.code(500).send({
+          error: { code: 'INTERNAL_ERROR', message: 'Internal Server Error' }
+        })
       }
     })
 
-    // (optional) dev test route – send email via Mailpit/SMTP
+    // Dev email test
     api.post('/dev/send-test-email', {
       schema: {
         body: {
@@ -225,19 +261,23 @@ export function buildApp() {
           },
           additionalProperties: false
         }
-      },
-      handler: async (req, reply) => {
-        const to = req.body?.to || 'test@example.com'
-        await sendMail({
-          to,
-          subject: 'P5 Mail Test',
-          text: 'Hello from P5 API (staging/dev)',
-          html: '<p>Hello from <strong>P5 API</strong> (staging/dev)</p>'
-        })
-        return reply.code(202).send({ sent: true, to })
       }
+    }, async (req, reply) => {
+      const to = req.body?.to || 'test@example.com'
+
+      await api.sendMail({
+        to,
+        subject: 'P5 Mail Test',
+        text: 'Hello from P5 API',
+        html: '<p>Hello from <strong>P5 API</strong></p>'
+      })
+
+      return reply.code(202).send({ sent: true, to })
     })
-  }, { prefix: '/api' })
+  }
+
+  // ---- API (rate-limited) ----
+  app.register(apiRoutes, { prefix: '/api' })
 
   // ---- Graceful shutdown ----
   app.addHook('onClose', async () => {
