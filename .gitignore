@@ -15,37 +15,36 @@ build/
 coverage/
 *.log
 
-# --- Tests (artifacts/patterns only; keep sources tracked) ---
-*/.test.*
-*/.spec.*
-
 # --- Prisma (generated/cache/local env) ---
 .prisma/
 prisma/node_modules/
 prisma/.cache/
 prisma/.env
 
-# --- Env files (never commit secrets) ---
+# --- Env files / secrets ---
 .env
 .env.*
 *.local
 
-# --- Runtime data (local only) ---
+# --- Runtime / local state ---
 storage/
 **/dump.rdb
 **/postmaster.pid
 
-# --- Snapshots / local artifacts ---
+# --- Snapshots / archive artifacts ---
 project-snapshot/
 project-snapshot*.zip
 
-# --- Backups & DB dumps (very important) ---
+# --- Backups / DB dump files ---
 backups/
 *.dump
-*.sql
 *.sql.gz
 *.tar.gz
 
-# --- Docker/dev only configs not needed in repo builds ---
+# Ignore loose SQL dumps in root or elsewhere, but keep known tracked bootstrap file
+*.sql
+!staging-bootstrap.sql
+
+# --- Docker / local overrides ---
 docker-compose.override.yml
 *.local.yml

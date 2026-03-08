@@ -1,220 +1,123 @@
-📖 Final README.md (paste this as is)
+# p5 — Procurement Workflow SaaS (Local Dev Baseline)
 
-# p5 — API (Fastify + Prisma + Postgres)
+p5 is a procurement workflow operating system being built for SMEs.  
+The current repository contains the stabilized local development baseline for the API layer.
 
-![CI](https://github.com/covohra/p5/actions/workflows/ci.yml/badge.svg)
+This project is intentionally being built in controlled phases:
 
-Monorepo with a Fastify API, Prisma ORM, and PostgreSQL.  
-CI runs tests on every push to main and deploys to Fly.io when green.
-
----
-
-## 📦 Stack
-- *Runtime:* Node 20, pnpm workspaces  
-- *API:* Fastify  
-- *DB:* PostgreSQL  
-- *ORM:* Prisma  
-- *Tests:* Vitest + Supertest  
-- *Infra:* Fly.io (Machines)  
-- *CI/CD:* GitHub Actions  
+1. Stabilize local baseline
+2. Complete production-ready API badge
+3. Build procurement spine
+4. Add pilot usability features
 
 ---
 
-## 🗂 Repo Layout
+## Current Status
 
-. ├─ apps/ │  └─ api/                   # Fastify app (ports, routes, tests) │     ├─ src/ │     ├─ test/ │     └─ node_modules/.prisma/client  # Prisma client generated here ├─ prisma/ │  ├─ schema.prisma          # Data model │  └─ migrations/            # Prisma migrations ├─ .github/workflows/ci.yml  # CI/CD pipeline ├─ package.json              # workspace root └─ pnpm-workspace.yaml
+The project is not starting from zero.
 
----
+Current state:
 
-## 🛠 Local Development
+- Strategy and product blueprint are largely complete
+- Backend architecture baseline is stabilized
+- Local API is running
+- Prisma and PostgreSQL are working
+- Docker local infrastructure is working
+- JWT login baseline is working
+- Health, readiness, and version endpoints are working
+- Metrics endpoint is working
+- Global error handling is working
+- Mailpit email test support is working
 
-### Setup
-```powershell
-cd C:\Users\<you>\Dev\p5
-corepack enable
-corepack prepare pnpm@latest --activate
-pnpm install
-docker compose up -d
+The next major development step is:
 
-Database & Prisma
-
-# copy env file
-Copy-Item .\.env.local .\prisma\.env -Force
-
-# generate client
-pnpm prisma:generate
-
-# run migrations
-pnpm prisma:migrate
-
-# seed data
-pnpm prisma:seed
-
-# smoke test: should list seeded users incl. covohra@gmail.com
-pnpm db:smoke
-
-Services
-
-API: http://localhost:3000
-
-Health: http://localhost:3000/health
-
-Ready: http://localhost:3000/ready
-
-Postgres: host 127.0.0.1, port 55432, db p5db, user p5, pass p5pass
-
-Redis: redis://127.0.0.1:6379
-
-Mailpit: http://localhost:8025 (SMTP: 127.0.0.1:1025)
-
-
+- Build the first real procurement module: RFQ
 
 ---
 
-🧪 Testing
+## Product Identity
 
-pnpm --filter @p5/api test
+p5 is a procurement workflow SaaS for SMEs and procurement-heavy businesses.
 
-Unit/integration tests live in apps/api/test/
+Core workflow:
 
-DB-backed tests use ephemeral Postgres in CI
+RFQ -> Invite -> Quote -> Bid-tab -> Approval -> Award -> PO / ERP Export
 
-
-
----
-
-🚀 Fly.io Deployment
-
-One-time setup
-
-# login
-flyctl auth login
-
-# create app (skip if already created)
-flyctl apps create p5-api
-
-# create Postgres (choose nearest region, e.g. sin = Singapore)
-flyctl postgres create --name p5-postgres
-
-# attach DB to app (sets DATABASE_URL secret)
-flyctl postgres attach --app p5-api p5-postgres
-
-Run migrations against production DB
-
-# open proxy in a separate terminal
-flyctl proxy 5433 -a p5-postgres
-
-# in prisma workspace
-cd prisma
-pnpm install
-$env:DATABASE_URL="postgres://p5_api:<password>@127.0.0.1:5433/p5_api?sslmode=disable"
-pnpm exec prisma migrate deploy --schema ./schema.prisma
-cd ..
-
-Deploy API
-
-flyctl deploy --app p5-api
-flyctl status --app p5-api
-flyctl logs   --app p5-api
-
-Smoke test (remote)
-
-# health & ready
-curl -s https://p5-api.fly.dev/health
-curl -s https://p5-api.fly.dev/ready
-
-# create a smoke user
-$email = "covohra+smoke$((Get-Random))@example.com"
-$body = @{ email = $email; name = "Smoke Test" } | ConvertTo-Json
-Invoke-RestMethod -Uri "https://p5-api.fly.dev/api/users" -Method Post -ContentType "application/json" -Body $body
-
-# list smoke users
-Invoke-RestMethod -Uri "https://p5-api.fly.dev/api/users" |
-  Where-Object { $_.email -like "covohra+smoke*@example.com" }
-
+p5 is not intended to replace ERP.  
+ERP remains the financial or transactional system of record.  
+p5 sits before ERP in the sourcing process and makes the sourcing layer structured, auditable, and easier to execute.
 
 ---
 
-⚙️ CI/CD
+## Tech Stack
 
-Workflow: .github/workflows/ci.yml
-
-Jobs:
-
-1. Setup Node & pnpm (version pinned from repo)
-
-
-2. Install deps with --ignore-scripts
-
-
-3. Generate Prisma client into apps/api
-
-
-4. Apply migrations to ephemeral Postgres
-
-
-5. Run tests
-
-
-6. Deploy to Fly.io
-
-
-7. Post-deploy smoke test (probes /health)
-
-
-
-> Requires repo secret FLY_API_TOKEN.
-
-
-
+- Node.js 20
+- pnpm workspaces
+- Fastify 4
+- Prisma 5
+- PostgreSQL
+- Redis
+- Docker Compose
+- Vitest
+- Fly.io
 
 ---
 
-🐛 Troubleshooting
+## Monorepo Structure
 
-“Cannot find module '.prisma/client/default'”
-Run:
+```text
+p5/
+  apps/
+    api/
+      src/
+      test/
+  prisma/
+    schema.prisma
+    migrations/
+  docs/
+  scripts/
+  ops/
+  storage/
+  backups/
 
-pnpm --filter @p5/prisma exec prisma generate --schema prisma/schema.prisma
+  Important active backend files:
 
-Migrations fail in CI
-Ensure DATABASE_URL env matches the CI Postgres service.
+apps/api/src/server.js -> canonical API entrypoint
+apps/api/src/app.js -> canonical Fastify application
+apps/api/src/config.js -> configuration and environment handling
+apps/api/src/version.js -> version/build/runtime information
+apps/api/src/email.js -> mailer logic
+apps/api/src/errors.js -> global error handler
+prisma/schema.prisma -> canonical database schema
 
-Deploy fails with auth
-Set FLY_API_TOKEN under Settings → Secrets → Actions.
+Important active backend files:
+apps/api/src/server.js -> canonical API entrypoint
+apps/api/src/app.js -> canonical Fastify application
+apps/api/src/config.js -> configuration and environment handling
+apps/api/src/version.js -> version/build/runtime information
+apps/api/src/email.js -> mailer logic
+apps/api/src/errors.js -> global error handler
+prisma/schema.prisma -> canonical database schema
 
+Environment Rules
 
+Important locked rules:
+Use root .env only
+Do not create prisma/.env
+.env.example is template/reference only
+Real secrets must never be committed
+Any real secret that was pasted into chat or shared in documentation should be treated as compromised and rotated
+For local development, prefer safe placeholder values
 
----
+Recommended local dev auth values:
+AUTH_EMAIL=admin@p5.local
+AUTH_PASSWORD=dev-password-only
+JWT_SECRET=local-dev-secret-change-later
 
-🗺 Roadmap
-
-Staging environment on Fly
-
-Preview apps per PR
-
-DB migrations gate (apply on deploy)
-
-Observability: Fly logs, Sentry, OpenTelemetry
-
-Security headers + stricter CORS
-
-Dependabot/Renovate for deps
-
-Automated load/perf smoke tests
-
-Nightly backup job for Postgres
-
-
-
----
-
-📝 Notes
-
-Do not commit .env.local or prisma/.env (local only).
-
-For production: migrations are applied manually once; automation will be added later.
-
-Mailpit is local only (dev email sink).
-
-CORS is currently origin: true (open). Lock it down once frontend domain is known.
+Recommended Mailpit local dev values:
+SMTP_HOST=127.0.0.1
+SMTP_PORT=1025
+SMTP_USER=
+SMTP_PASS=
+SMTP_SECURE=
+SMTP_FROM=p5@local.test
